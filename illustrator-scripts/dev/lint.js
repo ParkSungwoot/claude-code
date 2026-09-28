@@ -78,6 +78,14 @@ for (const file of files) {
       if (node.type === 'WithStatement' || node.type === 'DebuggerStatement') problems.push(`${at}: ${node.type}`);
       if ((node.type === 'FunctionDeclaration') && node.body && node.body.type !== 'BlockStatement') problems.push(`${at}: odd function`);
     });
+    // functions sent to Illustrator through BridgeTalk (named ...Core) must be plain ASCII
+    walk.simple(ast, {
+      FunctionDeclaration(node) {
+        if (/Core$/.test(node.id.name) && /[^\x00-\x7f]/.test(src.slice(node.start, node.end))) {
+          problems.push(`line ${node.loc.start.line}: ${node.id.name}() is sent through BridgeTalk and must be ASCII only`);
+        }
+      },
+    });
     // function declarations inside blocks (if/for/while) are not portable in ES3
     walk.ancestor(ast, {
       FunctionDeclaration(node, ancestors) {

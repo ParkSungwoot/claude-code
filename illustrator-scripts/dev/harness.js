@@ -142,6 +142,7 @@ class UI {
       _preferred: makeDimension(this.errors),
       _closed: false,
       _result: undefined,
+      location: win ? env.varr([100, 100]) : undefined,
     };
     if (type === 'dropdownlist' || type === 'listbox') {
       for (const t of Array.from(text || [])) state._items.push(ui.makeItem(String(t), state._items.length));
@@ -609,6 +610,15 @@ function makeIllustrator(env, fsys) {
     UserInteractionLevel: enumOf('UserInteractionLevel', { DISPLAYALERTS: 2, DONTDISPLAYALERTS: -1 }, errors),
     SaveOptions: enumOf('SaveOptions', { DONOTSAVECHANGES: 2, PROMPTTOSAVECHANGES: 3, SAVECHANGES: 1 }, errors),
     ExportForScreensType: enumOf('ExportForScreensType', { SE_PDF: 1, SE_PNG8: 2, SE_PNG24: 3, SE_JPEG100: 4, SE_JPEG80: 5, SE_JPEG60: 6, SE_JPEG30: 7, SE_SVG: 8 }, errors),
+    Justification: enumOf('Justification', { CENTER: 2, FULLJUSTIFY: 6, FULLJUSTIFYLASTLINECENTER: 5, FULLJUSTIFYLASTLINELEFT: 3, FULLJUSTIFYLASTLINERIGHT: 4, LEFT: 0, RIGHT: 1 }, errors),
+    TextType: enumOf('TextType', { AREATEXT: 1, PATHTEXT: 2, POINTTEXT: 0 }, errors),
+    TextOrientation: enumOf('TextOrientation', { HORIZONTAL: 0, VERTICAL: 1 }, errors),
+  };
+  const JUST_NAMES = Object.keys(E.Justification);
+  const justName = (v) => {
+    const n = JUST_NAMES.find((k) => E.Justification[k] === v);
+    if (!n) throw new Error('bad Justification value ' + v);
+    return n;
   };
   const classes = {};
   for (const [name, props] of Object.entries(OPTION_CLASSES)) {
@@ -688,6 +698,7 @@ function makeIllustrator(env, fsys) {
       artboards: artboardsArr,
       layers,
       get selection() {
+        if (spec.textEditing && typeof spec.textEditing === 'object') return editingRange(items, spec.textEditing);
         if (spec.textEditing) return strict({ typename: 'TextRange', length: 5, contents: 'hello' }, new Set(['typename', 'length', 'contents']), 'TextRange', errors);
         return env.varr(items);
       },
@@ -789,19 +800,24 @@ function makeIllustrator(env, fsys) {
   const ITEM_COMMON = ['typename', 'name', 'geometricBounds', 'visibleBounds', 'translate', 'locked', 'hidden', 'parent',
     'layer', 'left', 'top', 'width', 'height', 'position', 'uuid', '_spec'];
   const ITEM_EXTRA = {
-    TextFrame: ['contents', 'textRange', 'kind'],
+    TextFrame: ['contents', 'textRange', 'kind', 'orientation', 'paragraphs', 'story', 'anchor', 'lines'],
     GroupItem: ['clipped', 'pageItems', 'pathItems', 'compoundPathItems'],
     PathItem: ['clipping', 'filled', 'stroked', 'strokeWidth'],
     CompoundPathItem: ['pathItems'],
   };
 
   function makeItem(s) {
+    if (s.text) s.bounds = textBounds(s.text);
     s.bounds = s.bounds.slice();
     const stroke = s.stroke || 0;
     const t = {
       typename: s.type,
-      get geometricBounds() { return env.varr(s.bounds); },
+      get geometricBounds() {
+        if (s.text) s.bounds = textBounds(s.text);
+        return env.varr(s.bounds);
+      },
       get visibleBounds() {
+        if (s.text) s.bounds = textBounds(s.text);
         const b = s.bounds;
         return env.varr([b[0] - stroke / 2, b[1] + stroke / 2, b[2] + stroke / 2, b[3] - stroke / 2]);
       },
@@ -811,6 +827,11 @@ function makeIllustrator(env, fsys) {
         for (const b of [objects, fillPatterns, fillGradients, strokePattern]) if (typeof b !== 'boolean') throw new Error('translate: flags must be boolean');
         if (s.locked) throw new Error('Target layer cannot be modified');
         env.translateCalls.push({ name: s.name, dx, dy, flags: [objects, fillPatterns, fillGradients, strokePattern] });
+        if (s.text) {
+          const m = s.text;
+          if (m.kind === 'point') m.anchor = [m.anchor[0] + dx, m.anchor[1] + dy];
+          else m.frame = [m.frame[0] + dx, m.frame[1] + dy, m.frame[2] + dx, m.frame[3] + dy];
+        }
         s.bounds = [s.bounds[0] + dx, s.bounds[1] + dy, s.bounds[2] + dx, s.bounds[3] + dy];
         if (s.children) for (const c of s.children) c._shift(dx, dy);
       },
@@ -823,6 +844,7 @@ function makeIllustrator(env, fsys) {
       set: (v) => { if (typeof v !== 'string') throw new Error('name must be string'); s.name = v; },
       enumerable: true,
     });
+    if (s.type === 'TextFrame' && s.text) addTextModel(t, s);
     if (s.type === 'TextFrame') {
       Object.defineProperty(t, 'contents', {
         get: () => s.contents,
@@ -838,7 +860,107 @@ function makeIllustrator(env, fsys) {
     if (s.type === 'PathItem') t.clipping = !!s.clipping;
     if (s.type === 'CompoundPathItem') t.pathItems = env.varr((s.paths || []).map((c) => makeItem(c)));
     const allowed = new Set(ITEM_COMMON.concat(ITEM_EXTRA[s.type] || []));
-    return strict(t, allowed, s.type, errors);
+    const proxy = strict(t, allowed, s.type, errors);
+    s._proxy = proxy;
+    return proxy;
+  }
+
+  // ---- text model -----------------------------------------------------------
+  // s.text = { kind: 'point'|'area'|'path', orientation: 'h'|'v', rotation: deg, anchor: [x, y] (point text),
+  //            frame: [l, t, r, b] (area/path), leading, ascent, descent,
+  //            paragraphs: [{ width, justification: 'LEFT'|..., empty }] }
+  // Point text lines are placed around the anchor according to their justification, like Illustrator does.
+  const LINE_OFFSET = { LEFT: 0, CENTER: 0.5, RIGHT: 1 };
+  function textBounds(m) {
+    if (m.kind !== 'point') return m.frame.slice();
+    const lead = m.leading || 12;
+    const asc = m.ascent === undefined ? 9 : m.ascent;
+    const desc = m.descent === undefined ? 3 : m.descent;
+    const th = (m.rotation || 0) * Math.PI / 180;
+    const cos = Math.cos(th);
+    const sin = Math.sin(th);
+    let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    m.paragraphs.forEach((p, i) => {
+      const f = LINE_OFFSET[p.justification] !== undefined ? LINE_OFFSET[p.justification] : 0;
+      const w = p.empty ? 0 : p.width;
+      let corners;
+      if (m.orientation === 'v') {
+        const half = (asc + desc) / 2;
+        corners = [[-i * lead - half, f * w], [-i * lead + half, -(1 - f) * w]];
+      } else {
+        corners = [[-f * w, -i * lead + asc], [(1 - f) * w, -i * lead - desc]];
+      }
+      for (const x of [corners[0][0], corners[1][0]]) {
+        for (const y of [corners[0][1], corners[1][1]]) {
+          const rx = m.anchor[0] + x * cos - y * sin;
+          const ry = m.anchor[1] + x * sin + y * cos;
+          minX = Math.min(minX, rx); maxX = Math.max(maxX, rx);
+          minY = Math.min(minY, ry); maxY = Math.max(maxY, ry);
+        }
+      }
+    });
+    return [minX, maxY, maxX, minY];
+  }
+
+  function paragraphObject(m, p) {
+    const attrs = {};
+    Object.defineProperty(attrs, 'justification', {
+      get: () => E.Justification[p.justification],
+      set: (v) => {
+        if (p.empty) throw new Error('The paragraph is empty');
+        p.justification = justName(v);
+        env.log.push('justify ' + p.justification);
+      },
+      enumerable: true,
+    });
+    const para = { length: p.empty ? 0 : 5, paragraphAttributes: strict(attrs, new Set(['justification']), 'ParagraphAttributes', errors) };
+    return strict(para, new Set(['length', 'paragraphAttributes', 'contents']), 'Paragraph', errors);
+  }
+
+  function rangeObject(m, paragraphs, length, story) {
+    const attrs = {};
+    Object.defineProperty(attrs, 'justification', {
+      get: () => E.Justification[paragraphs[0].justification],
+      set: (v) => {
+        if (length === 0) throw new Error('The text range is empty');
+        if (m.rangeSetThrows) throw new Error('simulated range failure');
+        for (const p of paragraphs) if (!p.empty) p.justification = justName(v);
+        env.log.push('justify range ' + justName(v));
+      },
+      enumerable: true,
+    });
+    const r = {
+      typename: 'TextRange',
+      length,
+      paragraphAttributes: strict(attrs, new Set(['justification']), 'ParagraphAttributes', errors),
+      paragraphs: env.varr(paragraphs.map((p) => paragraphObject(m, p))),
+    };
+    Object.defineProperty(r, 'story', { get: () => story(), enumerable: true });
+    return strict(r, new Set(['typename', 'length', 'paragraphAttributes', 'paragraphs', 'story', 'contents', 'characterAttributes', 'parent']), 'TextRange', errors);
+  }
+
+  function addTextModel(t, s) {
+    const m = s.text;
+    const kinds = { point: E.TextType.POINTTEXT, area: E.TextType.AREATEXT, path: E.TextType.PATHTEXT };
+    t.kind = kinds[m.kind];
+    t.orientation = m.orientation === 'v' ? E.TextOrientation.VERTICAL : E.TextOrientation.HORIZONTAL;
+    const story = () => strict({
+      get textFrames() { return env.varr([s._proxy]); },
+      get textRange() { return rangeObject(m, m.paragraphs, 10, story); },
+    }, new Set(['textFrames', 'textRange', 'paragraphs']), 'Story', errors);
+    Object.defineProperty(t, 'textRange', { get: () => rangeObject(m, m.paragraphs, 10, story), enumerable: true });
+    Object.defineProperty(t, 'paragraphs', { get: () => env.varr(m.paragraphs.map((p) => paragraphObject(m, p))), enumerable: true });
+    Object.defineProperty(t, 'story', { get: () => story(), enumerable: true });
+    Object.defineProperty(t, 'anchor', { get: () => env.varr(m.anchor || [0, 0]), enumerable: true });
+    m._story = story;
+  }
+
+  // Text editing mode: doc.selection is a TextRange inside one frame
+  function editingRange(items, e) {
+    const s = items[e.item || 0]._spec;
+    const m = s.text;
+    const paragraphs = (e.paragraphs || m.paragraphs.map((p, i) => i)).map((i) => m.paragraphs[i]);
+    return rangeObject(m, paragraphs, e.length === undefined ? 3 : e.length, m._story);
   }
 
   function makeChild(c) {
@@ -881,10 +1003,46 @@ function runScript(scriptPath, config) {
       ui.windows.push(w);
       return w;
     },
-    $: { os: config.os === 'win' ? 'Windows/64 10.0' : 'Macintosh OS 14.0/64', writeln() {}, global: null },
+    $: {
+      os: config.os === 'win' ? 'Windows/64 10.0' : 'Macintosh OS 14.0/64',
+      writeln() {},
+      global: vm.runInContext('this', ctx),
+      screens: varr([{ left: 0, top: 0, right: 1920, bottom: 1080 }]),
+    },
   };
   Object.assign(globals, ai.enums, ai.classes);
   for (const [k, v] of Object.entries(globals)) ctx[k] = v;
+
+  // BridgeTalk: the palette sends code to Illustrator's main engine, which is a different engine
+  // (it does not see the palette's variables). Emulate that with a second realm.
+  const main = createRealm();
+  const mainGlobals = Object.assign({}, globals, { $: Object.assign({}, globals.$, { global: vm.runInContext('this', main.ctx) }) });
+  delete mainGlobals.Window;
+  for (const [k, v] of Object.entries(mainGlobals)) main.ctx[k] = v;
+  env.bridgeBodies = [];
+  const BridgeTalk = function () {
+    const self = { target: undefined, body: undefined, onResult: undefined, onError: undefined, headers: {} };
+    self.send = function () {
+      if (typeof self.body !== 'string') throw new Error('BridgeTalk body must be a string');
+      if (/[^\x00-\x7f]/.test(self.body)) throw new Error('BridgeTalk body must be ASCII only');
+      if (!/^illustrator/.test(String(self.target))) throw new Error('bad BridgeTalk target ' + self.target);
+      env.bridgeBodies.push(self.body);
+      let result;
+      try {
+        result = vm.runInContext(self.body, main.ctx);
+      } catch (e) {
+        if (typeof self.onError === 'function') self.onError({ body: String(e.message) });
+        return true;
+      }
+      if (typeof self.onResult === 'function') self.onResult({ body: String(result) });
+      return true;
+    };
+    return strict(self, new Set(['target', 'body', 'onResult', 'onError', 'onReceived', 'onTimeout', 'timeout', 'headers',
+      'send', 'type', 'sender']), 'BridgeTalk', env.errors);
+  };
+  BridgeTalk.appSpecifier = 'illustrator-28.064';
+  BridgeTalk.appName = 'illustrator';
+  ctx.BridgeTalk = BridgeTalk;
 
   let source = fs.readFileSync(scriptPath, 'utf8');
   if (source.charCodeAt(0) === 0xfeff) source = source.slice(1);
@@ -894,6 +1052,8 @@ function runScript(scriptPath, config) {
   } catch (e) {
     thrown = e;
   }
+  // run the same file again in the same (persistent) engine, like choosing it from the Scripts menu twice
+  env.rerun = () => vm.runInContext(source, ctx, { filename: scriptPath });
   env.fsys = fsys;
   env.ai = ai;
   env.ui = ui;

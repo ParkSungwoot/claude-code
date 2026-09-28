@@ -30,7 +30,9 @@ for (const file of files) {
     const alerts = [];
     const ctx = vm.createContext({
       alert: (m) => alerts.push(String(m)),
+      $: { global: {} },
       app: { get documents() { throw new Error('should not reach app'); } },
+      Window: function () { throw new Error('should not reach app'); },
     });
     let result;
     try {

@@ -1222,7 +1222,7 @@ test('essential: tidy up with a typed gap centres a single row', () => {
 test('essential: match size (width to largest, height to smallest with ratio, both sides to the top object)', () => {
   const items = () => [rect('A', 0, 0, 10, 20), rect('B', 50, 0, 30, 15), rect('C', 100, 0, 20, 40)];
   let { env, ui } = openPanel({ documents: [{ selection: items() }] });
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('간격 · 크기');
   ui.click(ui.find('checkbox', '비율 유지')); // on by default → off
   ui.click(ui.button('크기 맞추기'));
   assertBounds(specOf(env, 'A').bounds, [-10, 0, 20, -20], 'A width 30 around its centre');
@@ -1231,7 +1231,7 @@ test('essential: match size (width to largest, height to smallest with ratio, bo
   assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 2개 → 폭 10.583 mm');
 
   ({ env, ui } = openPanel({ documents: [{ selection: items() }] }));
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('간격 · 크기');
   ui.select(ui.after('맞출 크기:', 'dropdownlist'), 1);
   ui.select(ui.after('기준 객체:', 'dropdownlist'), 1);
   ui.click(ui.button('크기 맞추기'));
@@ -1240,7 +1240,7 @@ test('essential: match size (width to largest, height to smallest with ratio, bo
   assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 2개 → 높이 5.292 mm');
 
   ({ env, ui } = openPanel({ documents: [{ selection: items() }] }));
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('간격 · 크기');
   ui.select(ui.after('맞출 크기:', 'dropdownlist'), 2);
   ui.select(ui.after('기준 객체:', 'dropdownlist'), 2);
   ui.click(ui.button('크기 맞추기'));
@@ -1254,14 +1254,14 @@ test('essential: match size (width to largest, height to smallest with ratio, bo
 
 test('essential: match size corrects for strokes and skips zero-size objects', () => {
   let { env, ui } = openPanel({ documents: [{ selection: [rect('S', 0, 0, 10, 10, { stroke: 2 }), rect('BIG', 50, 0, 30, 30)] }] });
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('간격 · 크기');
   ui.click(ui.button('크기 맞추기'));
   const vb = Array.from(env.ai.documents[0]._items[0].visibleBounds);
   assert.ok(Math.abs(vb[2] - vb[0] - 30) < 0.01, 'visible width 30 incl. stroke, got ' + (vb[2] - vb[0]));
   assert.ok(env.resizeCalls.length >= 2 && env.resizeCalls.length <= 4, 'corrected in a few passes');
 
   ({ env, ui } = openPanel({ documents: [{ selection: [rect('line', 0, 0, 0, 20), rect('A', 10, 0, 10, 10), rect('B', 30, 0, 20, 10)] }] }));
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('간격 · 크기');
   ui.click(ui.button('크기 맞추기'));
   assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 1개 → 폭 7.056 mm\n크기가 0이라 건너뛴 객체 1개');
 });
@@ -1287,7 +1287,7 @@ test('essential: reset rotation for paths (tag), text and images (matrix), mirro
     const { env, ui } = openPanel({ matrixSign, documents: [{ selection: selection() }] });
     const t0 = liveBounds(env, 'T');
     const anchor0 = specOf(env, 'T').text.anchor.slice();
-    ui.selectTab('크기 · 회전');
+    ui.selectTab('회전');
     ui.click(ui.button('0°로 초기화'));
     assert.ok(near(specOf(env, 'P').angle, 0), 'P straight');
     assert.strictEqual(tagAngle(specOf(env, 'P')), null, 'P tag cleared');
@@ -1312,7 +1312,7 @@ test('essential: match the top object angle, set a typed angle, report locked ob
   let { env, ui } = openPanel({
     documents: [{ selection: [rotRect('TOP', 0, 0, 20, 10, 45, { tagAngle: 45 }), rotRect('Q', 50, 0, 20, 10, 10, { tagAngle: 10 }), ptext('T', [100, 0], [[40, 'LEFT']])] }],
   });
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('회전');
   ui.click(ui.button('맨 위 객체 각도로'));
   assert.ok(near(specOf(env, 'Q').angle, 45) && near(tagAngle(specOf(env, 'Q')), 45), 'Q at 45°, tag updated');
   assert.ok(near(specOf(env, 'T').text.rotation, 45) && near(tagAngle(specOf(env, 'T')), 45), 'T at 45°');
@@ -1329,11 +1329,11 @@ test('essential: match the top object angle, set a typed angle, report locked ob
   assert.strictEqual(panelStatus(ui), '-15°로 맞췄습니다: 3개');
 
   ({ env, ui } = openPanel({ documents: [{ selection: [rotRect('A', 0, 0, 10, 10, 20, { tagAngle: 20 }), rotRect('L', 50, 0, 10, 10, 20, { tagAngle: 20, locked: true })] }] }));
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('회전');
   ui.click(ui.button('0°로 초기화'));
   assert.strictEqual(panelStatus(ui), '회전을 0°로 초기화했습니다: 1개\n1개 실패 (잠긴 객체?)');
   ({ env, ui } = openPanel({ documents: [{ selection: [rotRect('A', 0, 0, 10, 10, 20)] }] }));
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('회전');
   ui.click(ui.button('맨 위 객체 각도로'));
   assert.strictEqual(panelStatus(ui), '객체를 2개 이상 선택하세요.');
 });
@@ -1445,11 +1445,12 @@ test('essential: tabs, remembered tab and options', () => {
   assert.throws(() => ui.click(ui.button('기준선 맞추기')), /not selected/);
   ui.selectTab('텍스트');
   ui.click(ui.find('checkbox', '글자 모양 기준'));
-  ui.selectTab('크기 · 회전');
+  ui.selectTab('간격 · 크기');
   ui.select(ui.after('맞출 크기:', 'dropdownlist'), 2);
+  ui.selectTab('정리');
   win.close();
   ({ ui, win } = openPanel({ root, documents: [{}] }));
-  assert.strictEqual(ui.find('tab', '크기 · 회전')._state.parent.selection._state.text, '크기 · 회전');
+  assert.strictEqual(ui.find('tab', '정리')._state.parent.selection._state.text, '정리');
   assert.strictEqual(ui.find('checkbox', '글자 모양 기준')._state.value, true);
   assert.strictEqual(ui.after('맞출 크기:', 'dropdownlist').selection.index, 2);
 
@@ -1460,6 +1461,304 @@ test('essential: tabs, remembered tab and options', () => {
   assert.strictEqual(fs.readFileSync(ini, 'utf8'), 'tab=2\nwindowX=640\nwindowY=480', 'settings untouched by opening');
   assert.strictEqual(ui.find('tab', '텍스트')._state.parent.selection._state.text, '텍스트');
   assert.deepStrictEqual(Array.from(win.location), [640, 480]);
+});
+
+// ---- COC_illust Essential: key object, point rotation, organize tab ---------
+const pts = (name, points, extra) => Object.assign({ type: 'PathItem', name, points }, extra || {});
+const grp = (name, children, extra) => Object.assign({ type: 'GroupItem', name, children, derived: true, bounds: [0, 0, 0, 0] }, extra || {});
+const anchorAt = (env, name, i) => env.ai.documents[0]._find(name).points[i];
+const pointsBoundsOf = (points) => [Math.min(...points.map((p) => p[0])), Math.max(...points.map((p) => p[1])),
+  Math.max(...points.map((p) => p[0])), Math.min(...points.map((p) => p[1]))];
+const ALIGN_COMMANDS = ['Vertical Align Top', 'Horizontal Align Right', 'Vertical Align Bottom', 'Horizontal Align Left'];
+
+test('essential: match size to the key object (found with the Align commands, positions restored)', () => {
+  const items = () => [rect('A', 0, 0, 10, 10), rect('B', 50, 0, 30, 20), rect('C', 100, 0, 20, 40)];
+  let { env, ui } = openPanel({ documents: [{ selection: items(), keyObject: 'B' }] });
+  ui.select(ui.after('기준 객체:', 'dropdownlist'), 3);
+  ui.click(ui.button('크기 맞추기'));
+  assert.deepStrictEqual(env.menuCommands, ALIGN_COMMANDS);
+  assertBounds(specOf(env, 'B').bounds, [50, 0, 80, -20], 'key object untouched');
+  assertBounds(specOf(env, 'A').bounds, [-10, 10, 20, -20], 'A width 30 around its own centre (ratio kept)');
+  assertBounds(specOf(env, 'C').bounds, [95, 10, 125, -50], 'C width 30 around its own centre (ratio kept)');
+  assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 2개 → 폭 10.583 mm');
+
+  // no key object: everything goes back where it was, nothing is resized
+  ({ env, ui } = openPanel({ documents: [{ selection: items() }] }));
+  ui.select(ui.after('기준 객체:', 'dropdownlist'), 3);
+  ui.click(ui.button('크기 맞추기'));
+  assertBounds(specOf(env, 'A').bounds, [0, 0, 10, -10], 'A back in place');
+  assertBounds(specOf(env, 'B').bounds, [50, 0, 80, -20], 'B back in place');
+  assertBounds(specOf(env, 'C').bounds, [100, 0, 120, -40], 'C back in place');
+  assert.strictEqual(env.resizeCalls.length, 0);
+  assert.strictEqual(panelStatus(ui), '키 오브젝트를 찾지 못했습니다. 여러 객체를 선택한 뒤 기준 객체를 한 번 더 클릭해 굵은 테두리로 만드세요.');
+
+  // commands that do nothing must not make the first object the key
+  ({ env, ui } = openPanel({ documents: [{ selection: items(), keyObject: 'B', menuIgnored: true }] }));
+  ui.select(ui.after('기준 객체:', 'dropdownlist'), 3);
+  ui.click(ui.button('크기 맞추기'));
+  assert.strictEqual(env.resizeCalls.length, 0);
+  assert.ok(/^키 오브젝트를 찾지 못했습니다/.test(panelStatus(ui)));
+
+  // other references never touch the Align commands
+  ({ env, ui } = openPanel({ documents: [{ selection: items(), keyObject: 'B' }] }));
+  ui.click(ui.button('크기 맞추기'));
+  assert.deepStrictEqual(env.menuCommands, []);
+});
+
+test('essential: point-based rotation levels two anchor points about their middle', () => {
+  // bottom edge (0,0) → (100,10) is tilted by atan(0.1) ≈ 5.71°
+  const shape = () => pts('P', [[0, 0], [100, 10], [100, 60], [0, 50]], { selectedPoints: [0, 1] });
+  let { env, ui } = openPanel({ documents: [{ layers: [{ name: 'L', items: [shape()] }], select: ['P'] }] });
+  ui.selectTab('회전');
+  ui.click(ui.button('포인트 기준 수평 회전'));
+  let a = anchorAt(env, 'P', 0);
+  let b = anchorAt(env, 'P', 1);
+  assert.ok(near(a[1], b[1], 1e-9), 'points level');
+  assert.ok(near((a[0] + b[0]) / 2, 50, 1e-9) && near((a[1] + b[1]) / 2, 5, 1e-9), 'middle of the two points stays');
+  assert.ok(near(b[0] - a[0], Math.hypot(100, 10), 1e-9), 'turned, not squashed');
+  assert.strictEqual(panelStatus(ui), '두 점이 수평이 되도록 -5.711° 돌렸습니다: 객체 1개');
+
+  // the vertical button on the same (now level) edge turns by 90° the short way
+  ui.click(ui.button('포인트 기준 수직 회전'));
+  a = anchorAt(env, 'P', 0);
+  b = anchorAt(env, 'P', 1);
+  assert.ok(near(a[0], b[0], 1e-9), 'points on one vertical line');
+  assert.strictEqual(panelStatus(ui), '두 점이 수직이 되도록 -90° 돌렸습니다: 객체 1개');
+  ui.click(ui.button('포인트 기준 수직 회전'));
+  assert.strictEqual(panelStatus(ui), '두 점이 이미 수직입니다.');
+});
+
+test('essential: point rotation turns whole groups, several objects as one, and follows the Transform angle', () => {
+  // points on a path inside a compound path inside a group: the whole group turns, other paths too
+  const doc = () => ({
+    layers: [{
+      name: 'L',
+      items: [grp('G', [
+        { type: 'CompoundPathItem', name: 'CP', paths: [pts('inner', [[0, 0], [50, 5], [50, 30]], { selectedPoints: [0, 1] })], derived: true, bounds: [0, 0, 0, 0] },
+        pts('other', [[0, 100], [10, 100], [10, 110]]),
+      ], { tags: [{ name: 'BBAccumRotation', value: String(30 * Math.PI / 180) }] })],
+    }],
+    select: ['CP'],
+  });
+  let { env, ui } = openPanel({ documents: [doc()] });
+  ui.selectTab('회전');
+  ui.click(ui.button('포인트 기준 수평 회전'));
+  const delta = -Math.atan2(5, 50) * 180 / Math.PI;
+  const turned = turn([0, 100], [25, 2.5], delta);
+  assert.ok(near(anchorAt(env, 'other', 0)[0], turned[0], 1e-9) && near(anchorAt(env, 'other', 0)[1], turned[1], 1e-9), 'the rest of the group turned with it');
+  assert.ok(near(anchorAt(env, 'inner', 0)[1], anchorAt(env, 'inner', 1)[1], 1e-9));
+  assert.ok(near(tagAngle(env.ai.documents[0]._find('G')), 30 + delta, 1e-9), 'Transform panel angle follows');
+  assert.strictEqual(panelStatus(ui), '두 점이 수평이 되도록 ' + (Math.round(delta * 1000) / 1000) + '° 돌렸습니다: 객체 1개');
+
+  // one point on each of two objects: both turn together (the second point is picked first here)
+  ({ env, ui } = openPanel({
+    documents: [{
+      layers: [{ name: 'L', items: [pts('R', [[100, 10], [120, 10], [120, 30]], { selectedPoints: [0] }), pts('Q', [[0, 0], [-20, 0], [-20, 20]], { selectedPoints: [0] })] }],
+      select: ['R', 'Q'],
+    }],
+  }));
+  ui.selectTab('회전');
+  ui.click(ui.button('포인트 기준 수평 회전'));
+  const r0 = anchorAt(env, 'R', 0);
+  const q0 = anchorAt(env, 'Q', 0);
+  assert.ok(near(r0[1], q0[1], 1e-9), 'the two points level');
+  assert.ok(near(Math.hypot(r0[0] - q0[0], r0[1] - q0[1]), Math.hypot(100, 10), 1e-9), 'kept their distance');
+  assert.ok(near((r0[0] + q0[0]) / 2, 50, 1e-9) && near((r0[1] + q0[1]) / 2, 5, 1e-9), 'about their middle');
+  assert.ok(r0[0] > q0[0], 'turned the short way (not flipped over)');
+  assert.strictEqual(env.ai.documents[0]._find('R').tags.length, 0, 'no Transform angle invented');
+  assert.strictEqual(panelStatus(ui), '두 점이 수평이 되도록 -5.711° 돌렸습니다: 객체 2개');
+  noLeaks(env);
+});
+
+test('essential: point rotation needs exactly two separate points', () => {
+  const run1 = (points, selected) => {
+    const { env, ui } = openPanel({ documents: [{ layers: [{ name: 'L', items: [pts('P', points, { selectedPoints: selected })] }], select: ['P'] }] });
+    ui.selectTab('회전');
+    ui.click(ui.button('포인트 기준 수직 회전'));
+    assert.strictEqual(env.rotateCalls.length, 0);
+    return panelStatus(ui);
+  };
+  assert.strictEqual(run1([[0, 0], [10, 0], [10, 10]], [2]), '점을 정확히 두 개 선택하세요. (지금 1개) 직접 선택 도구(A)를 쓰세요.');
+  assert.strictEqual(run1([[0, 0], [10, 0], [10, 10]], 'all'), '점을 정확히 두 개 선택하세요. (지금 3개 이상) 직접 선택 도구(A)를 쓰세요.');
+  assert.strictEqual(run1([[5, 5], [5, 5], [10, 10]], [0, 1]), '두 점이 같은 위치에 있습니다. 떨어진 두 점을 고르세요.');
+  const { ui } = openPanel({ documents: [{ selection: [rect('A', 0, 0, 10, 10)] }] });
+  ui.selectTab('회전');
+  ui.click(ui.button('포인트 기준 수평 회전'));
+  assert.strictEqual(panelStatus(ui), '점을 정확히 두 개 선택하세요. (지금 0개) 직접 선택 도구(A)를 쓰세요.');
+});
+
+// Artboards placed out of index order: visually A B C in the top row, D below.
+const messyBoards = () => [
+  { name: 'C', rect: [300, 0, 400, -100] },
+  { name: 'A', rect: [0, 5, 100, -95] },
+  { name: 'D', rect: [10, -200, 110, -280] },
+  { name: 'B', rect: [150, -2, 290, -102] },
+];
+const messyLayers = () => [
+  {
+    name: 'Front',
+    items: [
+      rect('a1', 10, -5, 40, 40), rect('b1', 160, -10, 40, 40), rect('c1', 320, -10, 40, 40, { locked: true }),
+      rect('span', 90, -20, 80, 10), rect('off', 600, 0, 20, 20), rect('h1', 60, -210, 20, 20, { hidden: true }),
+      grp('g', [rect('g1', 310, -60, 20, 20, { locked: true }), rect('g2', 340, -60, 20, 20)]),
+    ],
+    layers: [{ name: 'Sub', visible: false, items: [rect('h2', 70, -230, 10, 10)] }],
+  },
+  { name: 'Back', locked: true, items: [rect('d1', 20, -210, 40, 40)] },
+];
+const boardRects = (env) => env.ai.documents[0]._artboards.map((a) => [a.name].concat(Array.from(a.artboardRect)));
+const openOrganize = (config) => {
+  const opened = openPanel(config);
+  opened.ui.selectTab('간격 · 크기');
+  opened.ui.select(opened.ui.after('간격:', 'dropdownlist'), 2); // pt
+  opened.ui.selectTab('정리');
+  opened.ui.type(opened.ui.after('간격:', 'edittext'), '20');
+  return opened;
+};
+
+test('essential: artboard rearrange keeps the placed order, renumbers, moves artwork, restores locks', () => {
+  const { env, ui } = openOrganize({ documents: [{ artboards: messyBoards(), activeArtboard: 0, layers: messyLayers() }] });
+  assert.strictEqual(ui.find('statictext', 'pt')._state.text, 'pt', 'unit label follows the panel unit');
+  ui.click(ui.button('아트보드 리어레인지'));
+  assert.deepStrictEqual(boardRects(env), [
+    ['A', 0, 5, 100, -95], ['B', 120, 5, 260, -95], ['C', 280, 5, 380, -95], ['D', 0, -115, 100, -195],
+  ]);
+  const doc = env.ai.documents[0];
+  assert.strictEqual(doc._activeArtboard, 2, 'the active artboard (C) is still active');
+  assertBounds(doc._find('a1').bounds, [10, -5, 50, -45], 'A did not move');
+  assertBounds(doc._find('b1').bounds, [130, -3, 170, -43], 'moved with B');
+  assertBounds(doc._find('span').bounds, [60, -13, 140, -23], 'goes with the artboard it overlaps most (B)');
+  assertBounds(doc._find('c1').bounds, [300, -5, 340, -45], 'locked object moved with C');
+  assertBounds(doc._find('g1').bounds, [290, -55, 310, -75], 'locked object inside a group moved');
+  assertBounds(doc._find('d1').bounds, [10, -125, 50, -165], 'object in a locked layer moved with D');
+  assertBounds(doc._find('h1').bounds, [50, -125, 70, -145], 'hidden object moved with D');
+  assertBounds(doc._find('h2').bounds, [60, -145, 70, -155], 'object in a hidden sublayer moved with D');
+  assertBounds(doc._find('off').bounds, [600, 0, 620, -20], 'pasteboard object stays');
+  assert.ok(doc._find('c1').locked && doc._find('g1').locked && doc._find('h1').hidden, 'objects locked / hidden again');
+  assert.ok(doc._layers[1].locked && doc._layers[0].layers[0].visible === false, 'layers locked / hidden again');
+  assert.ok(!doc._find('a1').locked && !doc._find('b1').hidden && !doc._layers[0].locked);
+  assert.deepStrictEqual(env.coordinateLog, ['document', 'artboard'], 'document coordinates only while working');
+  assert.strictEqual(panelStatus(ui), '아트보드 4개를 2행 × 3열로 정리하고, 놓인 순서대로 번호를 다시 매겼습니다.\n잠긴 것 3개는 잠깐 풀었다가 다시 잠갔습니다.');
+});
+
+test('essential: artboard rearrange by column count; canvas overflow puts everything back', () => {
+  let { env, ui } = openOrganize({ documents: [{ artboards: messyBoards(), layers: messyLayers() }] });
+  ui.click(ui.find('radiobutton', '열 수:'));
+  ui.type(ui.after('열 수:', 'edittext'), '2');
+  ui.click(ui.button('아트보드 리어레인지'));
+  assert.deepStrictEqual(boardRects(env), [
+    ['A', 0, 5, 100, -95], ['B', 120, 5, 260, -95], ['C', 0, -115, 100, -215], ['D', 120, -115, 220, -195],
+  ]);
+  assert.ok(/^아트보드 4개를 2행 × 2열로 정리하고/.test(panelStatus(ui)));
+
+  ({ env, ui } = openOrganize({ canvas: 420, documents: [{ artboards: messyBoards(), layers: messyLayers() }] }));
+  ui.type(ui.after('간격:', 'edittext'), '200');
+  ui.click(ui.button('아트보드 리어레인지'));
+  assert.deepStrictEqual(boardRects(env), messyBoards().map((b) => [b.name].concat(b.rect)), 'artboards back as they were');
+  assertBounds(env.ai.documents[0]._find('b1').bounds, [160, -10, 200, -50], 'artwork untouched');
+  assert.ok(env.ai.documents[0]._find('c1').locked);
+  assert.deepStrictEqual(env.coordinateLog, ['document', 'artboard']);
+  assert.strictEqual(panelStatus(ui), '아트보드가 캔버스 밖으로 나가서 정리하지 못했습니다. 간격을 줄이거나 열 수를 바꿔 보세요.');
+});
+
+test('essential: artboard rearrange input checks and remembered options', () => {
+  const root = fs.mkdtempSync(path.join(TMP, 'essential-organize-'));
+  let { env, ui, win } = openPanel({ root, documents: [{ artboards: messyBoards() }] });
+  ui.selectTab('정리');
+  assert.throws(() => ui.type(ui.after('열 수:', 'edittext'), '3'), /disabled/, 'column count only with 열 수');
+  ui.type(ui.after('간격:', 'edittext'), '-5');
+  ui.click(ui.button('아트보드 리어레인지'));
+  assert.strictEqual(panelStatus(ui), '아트보드 간격은 0 이상의 숫자로 입력해 주세요.');
+  ui.type(ui.after('간격:', 'edittext'), '12');
+  ui.click(ui.find('radiobutton', '열 수:'));
+  for (const bad of ['abc', '0', '2.5']) {
+    ui.type(ui.after('열 수:', 'edittext'), bad);
+    ui.click(ui.button('아트보드 리어레인지'));
+    assert.strictEqual(panelStatus(ui), '열 수는 1 이상의 정수로 입력해 주세요.', bad);
+  }
+  assert.deepStrictEqual(env.bridgeBodies, [], 'nothing sent');
+  ui.type(ui.after('열 수:', 'edittext'), '3');
+  ui.click(ui.find('checkbox', '01, 02 …'));
+  win.close();
+  ({ env, ui, win } = openPanel({ root, documents: [{}] }));
+  assert.strictEqual(ui.find('radiobutton', '열 수:')._state.value, true);
+  assert.strictEqual(ui.after('열 수:', 'edittext').text, '3');
+  assert.strictEqual(ui.find('checkbox', '01, 02 …')._state.value, true);
+  ui.selectTab('정리');
+  assert.strictEqual(ui.after('간격:', 'edittext').text, '12');
+});
+
+test('essential: artboard renaming to plain or padded numbers', () => {
+  const boards = (n) => Array.from({ length: n }, (_, i) => ({ name: 'x' + (n - i), rect: [i * 120, 0, i * 120 + 100, -100] }));
+  let { env, ui } = openPanel({ documents: [{ artboards: boards(12) }] });
+  ui.selectTab('정리');
+  ui.click(ui.button('아트보드 리네이밍'));
+  assert.deepStrictEqual(env.ai.documents[0]._artboards.map((a) => a.name), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']);
+  assert.strictEqual(panelStatus(ui), '아트보드 이름을 바꿨습니다: 1 ~ 12 (12개)');
+  ui.click(ui.find('checkbox', '01, 02 …'));
+  ui.click(ui.button('아트보드 리네이밍'));
+  assert.strictEqual(env.ai.documents[0]._artboards.map((a) => a.name).join(','), '01,02,03,04,05,06,07,08,09,10,11,12');
+  ({ env, ui } = openPanel({ documents: [{ artboards: boards(3) }] }));
+  ui.selectTab('정리');
+  ui.click(ui.find('checkbox', '01, 02 …'));
+  ui.click(ui.button('아트보드 리네이밍'));
+  assert.deepStrictEqual(env.ai.documents[0]._artboards.map((a) => a.name), ['01', '02', '03']);
+  assert.strictEqual(panelStatus(ui), '아트보드 이름을 바꿨습니다: 01 ~ 03 (3개)');
+});
+
+test('essential: artwork trim clips only what sticks out, in place, with the artboards it touches', () => {
+  const doc = () => ({
+    artboards: [{ name: '1', rect: [0, 0, 100, -100] }, { name: '2', rect: [100, 0, 200, -100] }, { name: '3', rect: [300, 0, 400, -100] }],
+    layers: [
+      {
+        name: 'Art',
+        items: [
+          rect('inside', 10, -10, 40, 40),
+          rect('bleed', -10, 10, 60, 60),
+          rect('span', 80, -10, 40, 40),
+          rect('spanOut', 80, 10, 40, 60),
+          rect('lockedBleed', 290, -10, 30, 40, { locked: true }),
+          rect('off', 500, 0, 50, 50),
+          rect('stroke', 0, -60, 90, 30, { stroke: 4 }), // only its stroke sticks out (left)
+          rect('guide', -50, -40, 300, 0.001, { guides: true }),
+        ],
+      },
+      { name: 'Hidden', visible: false, items: [rect('hiddenBleed', 350, 10, 20, 20)] },
+    ],
+  });
+  const { env, ui } = openPanel({ documents: [doc()] });
+  ui.selectTab('정리');
+  ui.click(ui.button('아트워크 트림'));
+  const d = env.ai.documents[0];
+  const clipOf = (name) => {
+    const g = d._find(name)._parentSpec;
+    assert.ok(g && g.type === 'GroupItem' && g.clipped, name + ' is in a clipping group');
+    const live = g.children.filter((c) => !c._removed);
+    assert.strictEqual(live.length, 2, name + ': mask and object');
+    assert.strictEqual(live[1].name, name, name + ' sits under the mask');
+    return live[0];
+  };
+  const mask = clipOf('bleed');
+  assert.ok(mask.type === 'PathItem' && mask.clipping && !mask.filled && !mask.stroked);
+  assertBounds(pointsBoundsOf(mask.points), [0, 0, 100, -100], 'mask = artboard 1');
+  const both = clipOf('spanOut');
+  assert.strictEqual(both.type, 'CompoundPathItem', 'two artboards: compound mask');
+  assert.deepStrictEqual(both.paths.map((p) => pointsBoundsOf(p.points)), [[100, 0, 200, -100], [0, 0, 100, -100]]);
+  assert.ok(both.paths.every((p) => p.clipping));
+  clipOf('stroke');
+  for (const n of ['inside', 'span', 'lockedBleed', 'off', 'guide', 'hiddenBleed']) {
+    assert.strictEqual(d._find(n)._parentSpec, null, n + ' untouched');
+  }
+  assert.deepStrictEqual(d._tree()[0].items, [
+    'inside', { GroupItem: ['PathItem', 'bleed'] }, 'span', { GroupItem: ['CompoundPathItem', 'spanOut'] },
+    'lockedBleed', 'off', { GroupItem: ['PathItem', 'stroke'] }, 'guide',
+  ], 'clipping groups take the place of their objects');
+  assert.deepStrictEqual(env.coordinateLog, ['document', 'artboard']);
+  assert.strictEqual(panelStatus(ui), '아트보드 밖으로 나간 객체 3개를 아트보드 크기로 잘랐습니다.\n잠기거나 숨긴 객체 2개는 건너뛰었습니다.');
+
+  ui.click(ui.button('아트워크 트림'));
+  assert.strictEqual(panelStatus(ui), '아트보드 밖으로 나간 객체가 없습니다.\n잠기거나 숨긴 객체 2개는 건너뛰었습니다.', 'a second run changes nothing');
+  noLeaks(env);
 });
 
 // ===========================================================================

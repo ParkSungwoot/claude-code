@@ -356,9 +356,11 @@ class Driver {
   }
 
   // The control of the given type that follows a statictext label in the same row.
+  // The same label may sit on several tabs; like a user, prefer the one on the tab that is showing.
   after(labelText, type) {
-    const labels = this.all().filter((c) => ['statictext', 'radiobutton', 'checkbox'].includes(c._state.type) &&
+    let labels = this.all().filter((c) => ['statictext', 'radiobutton', 'checkbox'].includes(c._state.type) &&
       matchText(c._state.text, labelText));
+    if (labels.length > 1) labels = labels.filter((c) => this.onShownTab(c));
     if (labels.length !== 1) throw new Error(`after(${labelText}) matched ${labels.length} labels`);
     const label = labels[0];
     const siblings = Array.from(label._state.parent._state.children);
@@ -388,6 +390,14 @@ class Driver {
 
   isUsable(c) {
     try { this.ensureUsable(c); return true; } catch (e) { return false; }
+  }
+
+  onShownTab(c) {
+    for (let p = c; p; p = p._state.parent) {
+      const parent = p._state.parent;
+      if (parent && parent._state.type === 'tabbedpanel' && parent._state._selection !== p) return false;
+    }
+    return true;
   }
 
   click(c) {
@@ -632,6 +642,9 @@ function makeIllustrator(env, fsys) {
     TextType: enumOf('TextType', { AREATEXT: 1, PATHTEXT: 2, POINTTEXT: 0 }, errors),
     TextOrientation: enumOf('TextOrientation', { HORIZONTAL: 0, VERTICAL: 1 }, errors),
     Transformation: enumOf('Transformation', { BOTTOM: 7, BOTTOMLEFT: 4, BOTTOMRIGHT: 10, CENTER: 6, DOCUMENTORIGIN: 1, LEFT: 3, RIGHT: 9, TOP: 5, TOPLEFT: 2, TOPRIGHT: 8 }, errors),
+    ElementPlacement: enumOf('ElementPlacement', { INSIDE: 0, PLACEAFTER: 1, PLACEATBEGINNING: 2, PLACEATEND: 3, PLACEBEFORE: 4 }, errors),
+    PathPointSelection: enumOf('PathPointSelection', { ANCHORPOINT: 2, LEFTDIRECTION: 3, LEFTRIGHTPOINT: 5, NOSELECTION: 1, RIGHTDIRECTION: 4 }, errors),
+    CoordinateSystem: enumOf('CoordinateSystem', { ARTBOARDCOORDINATESYSTEM: 1, DOCUMENTCOORDINATESYSTEM: 0 }, errors),
   };
   const JUST_NAMES = Object.keys(E.Justification);
   const justName = (v) => {
@@ -649,7 +662,25 @@ function makeIllustrator(env, fsys) {
 
   const documents = [];
   let active = null;
+  const CS = E.CoordinateSystem;
+  let coordinateSystem = env.config.coordinateSystem === 'document' ? CS.DOCUMENTCOORDINATESYSTEM : CS.ARTBOARDCOORDINATESYSTEM;
+  env.coordinateLog = [];
+  env.menuCommands = [];
+  env.created = []; // art made by the script (groups, rectangles, compound paths)
   const app = {
+    get coordinateSystem() { return coordinateSystem; },
+    set coordinateSystem(v) {
+      if (v !== CS.ARTBOARDCOORDINATESYSTEM && v !== CS.DOCUMENTCOORDINATESYSTEM) throw new Error('bad coordinate system');
+      coordinateSystem = v;
+      env.coordinateLog.push(v === CS.DOCUMENTCOORDINATESYSTEM ? 'document' : 'artboard');
+    },
+    // Only the Align panel commands are emulated (they honour the key object, like in Illustrator).
+    executeMenuCommand(command) {
+      if (typeof command !== 'string') throw new Error('executeMenuCommand expects a string');
+      env.menuCommands.push(command);
+      if (!active) throw new Error('There is no document');
+      active._menu(command);
+    },
     get documents() { return env.varr(documents); },
     get activeDocument() {
       if (!active) throw new Error('There is no document');
@@ -677,7 +708,7 @@ function makeIllustrator(env, fsys) {
     }, new Set(['getBooleanPreference']), 'Preferences', errors),
   };
   const appProxy = strict(app, new Set(['documents', 'activeDocument', 'version', 'userInteractionLevel', 'redraw',
-    'undo', 'PDFPresetsList', 'preferences']), 'Application', errors);
+    'undo', 'PDFPresetsList', 'preferences', 'coordinateSystem', 'executeMenuCommand']), 'Application', errors);
 
   function addDocument(spec) {
     const doc = makeDocument(spec);
@@ -695,9 +726,38 @@ function makeIllustrator(env, fsys) {
       if (typeof i !== 'number' || i < 0 || i >= artboards.length) throw new Error('bad artboard index ' + i);
       activeArtboard = i;
     };
-    const layers = makeLayers(spec.layers || [{ name: 'Layer 1' }]);
-    const items = (spec.selection || []).concat(spec.unselected || []).map((s) => makeItem(s));
-    let selected = items.slice(0, (spec.selection || []).length);
+    const layerSpecs = spec.layers || [{ name: 'Layer 1' }];
+    const layers = makeLayers(layerSpecs, null);
+    // Loose items (spec.selection / spec.unselected) sit on top of the first layer.
+    const loose = (spec.selection || []).concat(spec.unselected || []);
+    for (const s of loose) s._layerSpec = layerSpecs[0];
+    layerSpecs[0].items = loose.concat(layerSpecs[0].items);
+    const items = loose.map((s) => makeItem(s));
+    const topItems = items.slice();
+    walkLayers(layerSpecs, (ls) => {
+      for (const s of ls.items) if (!loose.includes(s)) topItems.push(proxyOf(s));
+    });
+    const allSpecs = () => {
+      const out = [];
+      walkLayers(layerSpecs, (ls) => walkItems(ls.items, (s) => out.push(s)));
+      return out;
+    };
+    const findProxy = (name) => {
+      const every = [];
+      const deep = (list) => {
+        for (const s of list) {
+          if (s._removed) continue;
+          every.push(s);
+          deep(s.children || []);
+          deep(s.paths || []);
+        }
+      };
+      walkLayers(layerSpecs, (ls) => deep(ls.items));
+      const hit = every.find((s) => s.name === name);
+      if (!hit) throw new Error('no item named ' + name);
+      return proxyOf(hit);
+    };
+    let selected = items.slice(0, (spec.selection || []).length).concat((spec.select || []).map(findProxy));
     const fileAbs = spec.file ? path.join(env.root, spec.file) : null;
     if (fileAbs) {
       fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
@@ -722,16 +782,53 @@ function makeIllustrator(env, fsys) {
         if (spec.textEditing) return strict({ typename: 'TextRange', length: 5, contents: 'hello' }, new Set(['typename', 'length', 'contents']), 'TextRange', errors);
         return env.varr(selected);
       },
-      // tests: change the selection by object names
+      // every page item at every depth, top of the stacking order first
+      get pageItems() { return env.varr(allSpecs().map(proxyOf)); },
+      // tests: change the selection by object names (anywhere in the layer tree)
       _select(names) {
-        selected = names.map((n) => {
-          const hit = items.find((it) => it._spec.name === n);
-          if (!hit) throw new Error('no item named ' + n);
-          return hit;
-        });
+        selected = names.map(findProxy);
+      },
+      _find(name) { return findProxy(name)._spec; },
+      // tests: names in stacking order, nested like the Layers panel
+      _tree() {
+        const itemTree = (list) => list.filter((s) => !s._removed).map((s) => (s.children ? { [s.name || s.type]: itemTree(s.children) } : (s.name || s.type)));
+        const layerTree = (specs) => specs.map((ls) => ({ layer: ls.name, items: itemTree(ls.items), layers: layerTree(ls.layers || []) }));
+        return layerTree(layerSpecs);
+      },
+      // Align panel commands: align the selection to the key object, the artboard or the selection bounds
+      _menu(command) {
+        const ALIGN = {
+          'Horizontal Align Left': [0, 'min'], 'Horizontal Align Center': [0, 'mid'], 'Horizontal Align Right': [0, 'max'],
+          'Vertical Align Top': [1, 'max'], 'Vertical Align Center': [1, 'mid'], 'Vertical Align Bottom': [1, 'min'],
+        };
+        const how = ALIGN[command];
+        if (!how) throw new Error('mock: unsupported menu command ' + command);
+        if (spec.menuIgnored) return; // a version where the command name does nothing
+        const [axis, side] = how;
+        const specs = selected.map((p) => p._spec).filter((s) => !s._removed);
+        const edge = (b) => {
+          const lo = axis === 0 ? b[0] : b[3];
+          const hi = axis === 0 ? b[2] : b[1];
+          return side === 'min' ? lo : (side === 'max' ? hi : (lo + hi) / 2);
+        };
+        const boundsOf = (s) => { refresh(s); return s.bounds; };
+        const key = spec.keyObject ? specs.find((s) => s.name === spec.keyObject) : null;
+        let target;
+        if (key) target = edge(boundsOf(key));
+        else if (spec.alignTo === 'artboard') target = edge(artboards[activeArtboard].artboardRect);
+        else if (specs.length < 2) return;
+        else target = edge(unionBounds(specs));
+        for (const s of specs) {
+          if (s === key) continue;
+          const d = target - edge(boundsOf(s));
+          if (Math.abs(d) < 1e-9) continue;
+          assertEditable(s);
+          if (axis === 0) shiftSpec(s, d, 0);
+          else shiftSpec(s, 0, d);
+        }
       },
       activeLayer: layers[0],
-      _items: items,
+      _items: topItems,
       _artboards: artboards,
       _layers: layers,
       _exports: [],
@@ -785,17 +882,32 @@ function makeIllustrator(env, fsys) {
       },
     };
     const proxy = strict(d, new Set(['name', 'fullName', 'path', 'saved', 'rulerUnits', 'artboards', 'layers', 'selection',
-      'activeLayer', 'activate', 'exportFile', 'exportForScreens', '_items', '_artboards', '_layers', '_exports', '_select',
-      '_activeArtboard']), 'Document', errors);
+      'activeLayer', 'activate', 'exportFile', 'exportForScreens', 'pageItems', '_items', '_artboards', '_layers', '_exports',
+      '_select', '_find', '_tree', '_menu', '_activeArtboard']), 'Document', errors);
     return proxy;
   }
 
+  // The canvas is limited (config.canvas = largest |coordinate|); Illustrator refuses artboards outside it.
   function makeArtboard(a) {
+    const limit = env.config.canvas || 8191;
     const t = {
       name: a.name,
       get artboardRect() { return env.varr(a.rect); },
-      set artboardRect(v) { a.rect = Array.from(v); },
+      set artboardRect(v) {
+        const r = Array.from(v);
+        if (r.length !== 4 || r.some((n) => typeof n !== 'number' || !isFinite(n))) throw new Error('bad artboard rect');
+        if (r[2] - r[0] < 1 || r[1] - r[3] < 1) throw new Error('artboard too small');
+        if (r.some((n) => Math.abs(n) > limit)) throw new Error('The artboard would be outside the canvas');
+        a.rect = r;
+      },
     };
+    for (const [key, fallback] of [['rulerOrigin', [0, 0]], ['rulerPAR', 1], ['showCenter', false], ['showCrossHairs', false], ['showSafeAreas', false]]) {
+      Object.defineProperty(t, key, {
+        get: () => (a[key] === undefined ? fallback : a[key]),
+        set: (v) => { a[key] = Array.isArray(v) || (v && typeof v === 'object') ? Array.from(v) : v; },
+        enumerable: true,
+      });
+    }
     Object.defineProperty(t, 'name', {
       get: () => a.name,
       set: (v) => {
@@ -808,9 +920,17 @@ function makeIllustrator(env, fsys) {
     return strict(t, new Set(['name', 'artboardRect', 'rulerOrigin', 'rulerPAR', 'showCenter', 'showCrossHairs', 'showSafeAreas']), 'Artboard', errors);
   }
 
-  function makeLayers(specs) {
+  // Layer spec: { name, locked, visible, items: [item specs, top first], layers: [sublayers] }
+  const layerProxies = new WeakMap();
+  function makeLayers(specs, parent) {
     return env.varr(specs.map((s) => {
-      const t = { typename: 'Layer', locked: !!s.locked, visible: s.visible !== false, _spec: s };
+      s._parentLayer = parent;
+      s.items = s.items || [];
+      for (const it of s.items) {
+        it._layerSpec = s;
+        it._parentSpec = null;
+      }
+      const t = { typename: 'Layer', _spec: s };
       Object.defineProperty(t, 'name', {
         get: () => s.name,
         set: (v) => {
@@ -820,19 +940,132 @@ function makeIllustrator(env, fsys) {
         },
         enumerable: true,
       });
-      t.layers = makeLayers(s.layers || []);
-      return strict(t, new Set(['typename', 'name', 'layers', 'locked', 'visible', '_spec']), 'Layer', errors);
+      for (const key of ['locked', 'visible']) {
+        Object.defineProperty(t, key, {
+          get: () => (key === 'visible' ? s.visible !== false : !!s.locked),
+          set: (v) => {
+            if (typeof v !== 'boolean') throw new Error('layer.' + key + ' must be boolean');
+            s[key] = v;
+          },
+          enumerable: true,
+        });
+      }
+      t.layers = makeLayers(s.layers || [], s);
+      Object.defineProperty(t, 'pageItems', { get: () => env.varr(s.items.filter((c) => !c._removed).map(proxyOf)), enumerable: true });
+      Object.defineProperties(t, Object.getOwnPropertyDescriptors(containerApi(s, 'layer')));
+      const proxy = strict(t, new Set(['typename', 'name', 'layers', 'locked', 'visible', 'pageItems', 'groupItems', 'pathItems',
+        'compoundPathItems', '_spec']), 'Layer', errors);
+      layerProxies.set(s, proxy);
+      return proxy;
     }));
   }
 
+  // ---- layer tree helpers -----------------------------------------------------
+  function walkLayers(specs, fn) {
+    for (const ls of specs) {
+      fn(ls);
+      walkLayers(ls.layers || [], fn);
+    }
+  }
+  function walkItems(list, fn) {
+    for (const s of list) {
+      if (s._removed) continue;
+      fn(s);
+      if (s.children) walkItems(s.children, fn);
+    }
+  }
+  function proxyOf(s) {
+    return s._proxy || makeItem(s);
+  }
+  function topOf(s) {
+    let top = s;
+    while (top._parentSpec) top = top._parentSpec;
+    return top;
+  }
+  // Why an item cannot be changed right now (Illustrator: "Target layer cannot be modified"), or null
+  function layerBlocked(ls) {
+    for (let l = ls; l; l = l._parentLayer) {
+      if (l.locked) return 'layer ' + l.name + ' is locked';
+      if (l.visible === false) return 'layer ' + l.name + ' is hidden';
+    }
+    return null;
+  }
+  function blocked(s) {
+    for (let p = s; p; p = p._parentSpec) {
+      if (p.locked) return (p.name || p.type) + ' is locked';
+      if (p.hidden) return (p.name || p.type) + ' is hidden';
+    }
+    return layerBlocked(topOf(s)._layerSpec);
+  }
+  function assertEditable(s) {
+    const why = blocked(s);
+    if (why) throw new Error('Target layer cannot be modified (' + why + ')');
+  }
+  function listOf(s) {
+    if (s._parentSpec) return s._parentSpec.children || s._parentSpec.paths;
+    if (s._layerSpec) return s._layerSpec.items;
+    return null;
+  }
+  function rectSpec(top, left, width, height) {
+    for (const v of [top, left, width, height]) if (typeof v !== 'number' || !isFinite(v)) throw new Error('rectangle: bad number');
+    if (width <= 0 || height <= 0) throw new Error('rectangle: bad size');
+    const r = left + width;
+    const b = top - height;
+    return { type: 'PathItem', name: '', points: [[left, top], [left, b], [r, b], [r, top]], filled: true, stroked: true, bounds: [left, top, r, b] };
+  }
+  // groupItems.add(), pathItems.rectangle() and compoundPathItems.add() of a layer, group or compound path.
+  // New art goes on top of the container, like in Illustrator.
+  function containerApi(owner, kind) {
+    const list = () => {
+      if (kind === 'layer') return owner.items;
+      if (kind === 'compound') return (owner.paths = owner.paths || []);
+      return (owner.children = owner.children || []);
+    };
+    const attach = (child) => {
+      const why = kind === 'layer' ? layerBlocked(owner) : blocked(owner);
+      if (why) throw new Error('Target layer cannot be modified (' + why + ')');
+      if (kind === 'layer') {
+        child._layerSpec = owner;
+        child._parentSpec = null;
+      } else {
+        child._parentSpec = owner;
+        child._layerSpec = null;
+      }
+      list().unshift(child);
+      env.created.push(child);
+      refresh(child);
+      return makeItem(child);
+    };
+    const api = {
+      get pathItems() {
+        const coll = env.varr(list().filter((c) => !c._removed && c.type === 'PathItem').map(proxyOf));
+        coll.rectangle = (top, left, width, height) => attach(rectSpec(top, left, width, height));
+        return coll;
+      },
+    };
+    if (kind !== 'compound') {
+      Object.defineProperty(api, 'groupItems', {
+        get: () => strict({ add: () => attach({ type: 'GroupItem', name: '', children: [], derived: true, bounds: [0, 0, 0, 0] }) },
+          new Set(['add']), 'GroupItems', errors),
+        enumerable: true,
+      });
+      Object.defineProperty(api, 'compoundPathItems', {
+        get: () => strict({ add: () => attach({ type: 'CompoundPathItem', name: '', paths: [], derived: true, bounds: [0, 0, 0, 0] }) },
+          new Set(['add']), 'CompoundPathItems', errors),
+        enumerable: true,
+      });
+    }
+    return api;
+  }
+
   const ITEM_COMMON = ['typename', 'name', 'geometricBounds', 'visibleBounds', 'translate', 'rotate', 'resize',
-    'duplicate', 'remove', 'selected', 'tags', 'locked', 'hidden', 'parent', 'layer', 'left', 'top', 'width', 'height',
+    'duplicate', 'remove', 'move', 'selected', 'tags', 'locked', 'hidden', 'parent', 'layer', 'left', 'top', 'width', 'height',
     'position', 'uuid', 'editable', '_spec'];
   const ITEM_EXTRA = {
     TextFrame: ['contents', 'textRange', 'kind', 'orientation', 'paragraphs', 'story', 'anchor', 'lines', 'matrix',
       'createOutline', 'characters', 'words'],
-    GroupItem: ['clipped', 'pageItems', 'pathItems', 'compoundPathItems', 'textFrames'],
-    PathItem: ['clipping', 'filled', 'stroked', 'strokeWidth'],
+    GroupItem: ['clipped', 'pageItems', 'pathItems', 'compoundPathItems', 'groupItems', 'textFrames'],
+    PathItem: ['clipping', 'filled', 'stroked', 'strokeWidth', 'pathPoints', 'guides'],
     CompoundPathItem: ['pathItems'],
     PlacedItem: ['matrix', 'file'],
     RasterItem: ['matrix'],
@@ -871,9 +1104,16 @@ function makeIllustrator(env, fsys) {
   }
   function refresh(s) {
     if (s.text) s.bounds = textBounds(s.text);
-    else if (s.derived) s.bounds = unionBounds(s.children || []);
+    else if (s.derived) s.bounds = unionBounds(s.children || s.paths || []);
+    else if (s.points) s.bounds = pointsBounds(s.points);
     else if (s.geo) s.bounds = geoBounds(s.geo, s.angle || 0);
   }
+  function pointsBounds(points) {
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
+    return [Math.min(...xs), Math.max(...ys), Math.max(...xs), Math.min(...ys)];
+  }
+  const kidsSpecs = (s) => (s.children || []).concat(s.paths || []);
   function shiftSpec(s, dx, dy) {
     if (s.text) {
       const m = s.text;
@@ -884,7 +1124,8 @@ function makeIllustrator(env, fsys) {
       s.geo.cx += dx;
       s.geo.cy += dy;
     }
-    for (const c of s.children || []) shiftSpec(c, dx, dy);
+    if (s.points) s.points = s.points.map((p) => [p[0] + dx, p[1] + dy]);
+    for (const c of kidsSpecs(s)) shiftSpec(c, dx, dy);
     refresh(s);
   }
   function rotateSpec(s, deg, center) {
@@ -907,7 +1148,8 @@ function makeIllustrator(env, fsys) {
       s.geo.cy = c[1];
       s.angle = (s.angle || 0) + deg;
     }
-    for (const c of s.children || []) rotateSpec(c, deg, center);
+    if (s.points) s.points = s.points.map((p) => rotatePoint(p, center, deg));
+    for (const c of kidsSpecs(s)) rotateSpec(c, deg, center);
     refresh(s);
   }
   function scaleSpec(s, sx, sy, center, lines) {
@@ -931,24 +1173,26 @@ function makeIllustrator(env, fsys) {
       s.geo = { cx: c[0], cy: c[1], w: s.geo.w * sx, h: s.geo.h * sy };
     }
     if (s.stroke) s.stroke *= lines / 100;
-    for (const c of s.children || []) scaleSpec(c, sx, sy, center, lines);
+    if (s.points) s.points = s.points.map(scaleAround);
+    for (const c of kidsSpecs(s)) scaleSpec(c, sx, sy, center, lines);
     refresh(s);
   }
   function removeSpec(s) {
     s._removed = true;
-    for (const c of s.children || []) removeSpec(c);
+    for (const c of kidsSpecs(s)) removeSpec(c);
   }
   function cloneSpec(s, parent) {
     const out = {};
     for (const [k, v] of Object.entries(s)) {
       if (k.startsWith('_') || typeof v === 'function') continue;
-      if (k === 'children') continue;
+      if (k === 'children' || k === 'paths') continue;
       out[k] = JSON.parse(JSON.stringify(v === undefined ? null : v));
     }
     if (s.children) {
       out.children = s.children.filter((c) => !c._removed).map((c) => cloneSpec(c, out));
       out.derived = true;
     }
+    if (s.paths) out.paths = s.paths.filter((c) => !c._removed).map((c) => cloneSpec(c, out));
     if (parent) out._parentSpec = parent;
     return out;
   }
@@ -963,8 +1207,34 @@ function makeIllustrator(env, fsys) {
     return [(s.bounds[0] + s.bounds[2]) / 2, (s.bounds[1] + s.bounds[3]) / 2];
   }
 
+  // Anchor points: s.points ([[x, y], ...]) or the corners of a plain rectangle (s.geo).
+  // s.selectedPoints: 'all' or indices of the anchors picked with the Direct Selection tool.
+  function pointSpecs(s) {
+    if (s.points) return s.points;
+    if (!s.geo) return [];
+    const g = s.geo;
+    return [[-g.w / 2, g.h / 2], [-g.w / 2, -g.h / 2], [g.w / 2, -g.h / 2], [g.w / 2, g.h / 2]]
+      .map(([x, y]) => rotatePoint([g.cx + x, g.cy + y], [g.cx, g.cy], s.angle || 0));
+  }
+  function pathPointsOf(s) {
+    const PPS = E.PathPointSelection;
+    const picked = (i) => s.selectedPoints === 'all' || (Array.isArray(s.selectedPoints) && s.selectedPoints.includes(i));
+    const out = [];
+    for (let i = 0; i < pointSpecs(s).length; i++) {
+      const at = () => env.varr(pointSpecs(s)[i].slice());
+      out.push(strict({
+        typename: 'PathPoint',
+        get anchor() { return at(); },
+        get leftDirection() { return at(); },
+        get rightDirection() { return at(); },
+        get selected() { env.counts.pointAccess = (env.counts.pointAccess || 0) + 1; return picked(i) ? PPS.ANCHORPOINT : PPS.NOSELECTION; },
+      }, new Set(['typename', 'anchor', 'leftDirection', 'rightDirection', 'selected']), 'PathPoint', errors));
+    }
+    return env.varr(out);
+  }
+
   function makeItem(s) {
-    if (!s.text && !s.geo && s.bounds && !s.derived) {
+    if (!s.text && !s.geo && !s.points && s.bounds && !s.derived) {
       const b = s.bounds;
       s.geo = { cx: (b[0] + b[2]) / 2, cy: (b[1] + b[3]) / 2, w: b[2] - b[0], h: b[1] - b[3] };
     }
@@ -989,7 +1259,7 @@ function makeIllustrator(env, fsys) {
         if (arguments.length !== 6) throw new Error('translate expects 6 args in these scripts');
         if (typeof dx !== 'number' || typeof dy !== 'number' || !isFinite(dx) || !isFinite(dy)) throw new Error('translate: bad delta');
         checkFlags('translate', [objects, fillPatterns, fillGradients, strokePattern]);
-        if (s.locked) throw new Error('Target layer cannot be modified');
+        assertEditable(s);
         env.translateCalls.push({ name: s.name, dx, dy, flags: [objects, fillPatterns, fillGradients, strokePattern] });
         shiftSpec(s, dx, dy);
       },
@@ -997,7 +1267,7 @@ function makeIllustrator(env, fsys) {
         if (arguments.length !== 6) throw new Error('rotate expects 6 args in these scripts');
         if (typeof angle !== 'number' || !isFinite(angle)) throw new Error('rotate: bad angle');
         checkFlags('rotate', [changePositions, fillPatterns, fillGradients, strokePattern]);
-        if (s.locked) throw new Error('Target layer cannot be modified');
+        assertEditable(s);
         env.rotateCalls.push({ name: s.name, angle });
         rotateSpec(s, angle, aboutPoint(s, about));
       },
@@ -1005,7 +1275,7 @@ function makeIllustrator(env, fsys) {
         if (arguments.length !== 8) throw new Error('resize expects 8 args in these scripts');
         for (const v of [sx, sy, lines]) if (typeof v !== 'number' || !isFinite(v) || v <= 0) throw new Error('resize: bad scale ' + v);
         checkFlags('resize', [changePositions, fillPatterns, fillGradients, strokePattern]);
-        if (s.locked) throw new Error('Target layer cannot be modified');
+        assertEditable(s);
         env.resizeCalls.push({ name: s.name, sx, sy, lines });
         scaleSpec(s, sx / 100, sy / 100, aboutPoint(s, about), lines);
       },
@@ -1019,11 +1289,77 @@ function makeIllustrator(env, fsys) {
       remove() {
         removeSpec(s);
       },
-      locked: !!s.locked,
-      hidden: false,
-      editable: !s.locked,
+      // move(relativeObject, ElementPlacement): into a layer / group (PLACEATBEGINNING, PLACEATEND)
+      // or next to another object (PLACEBEFORE = in front of it, PLACEAFTER = behind it)
+      move(target, placement) {
+        if (arguments.length !== 2) throw new Error('move expects 2 args');
+        const P = E.ElementPlacement;
+        assertEditable(s);
+        const ts = target && target._spec;
+        if (!ts) throw new Error('move: bad target');
+        const intoLayer = target.typename === 'Layer';
+        let dest;
+        if (placement === P.PLACEATBEGINNING || placement === P.PLACEATEND) {
+          if (!intoLayer && ts.type !== 'GroupItem') throw new Error('move: target must be a layer or a group');
+          const why = intoLayer ? layerBlocked(ts) : blocked(ts);
+          if (why) throw new Error('Target layer cannot be modified (' + why + ')');
+          dest = intoLayer ? ts.items : (ts.children = ts.children || []);
+        } else if (placement === P.PLACEBEFORE || placement === P.PLACEAFTER) {
+          if (intoLayer) throw new Error('mock: placing next to a layer is not supported');
+          dest = listOf(ts);
+          if (!dest) throw new Error('move: target is not in the document');
+          const why = ts._parentSpec ? blocked(ts._parentSpec) : layerBlocked(ts._layerSpec);
+          if (why) throw new Error('Target layer cannot be modified (' + why + ')');
+        } else {
+          throw new Error('move: unsupported placement');
+        }
+        for (let p = ts; p; p = p._parentSpec) if (p === s) throw new Error('move: cannot move an object into itself');
+        const from = listOf(s);
+        if (from) from.splice(from.indexOf(s), 1);
+        let index = dest.length;
+        if (placement === P.PLACEATBEGINNING) index = 0;
+        else if (placement !== P.PLACEATEND) index = dest.indexOf(ts) + (placement === P.PLACEAFTER ? 1 : 0);
+        dest.splice(index, 0, s);
+        if (placement === P.PLACEATBEGINNING || placement === P.PLACEATEND) {
+          s._parentSpec = intoLayer ? null : ts;
+          s._layerSpec = intoLayer ? ts : null;
+        } else {
+          s._parentSpec = ts._parentSpec || null;
+          s._layerSpec = ts._parentSpec ? null : ts._layerSpec;
+        }
+        return s._proxy;
+      },
       _spec: s,
     };
+    for (const key of ['locked', 'hidden']) {
+      Object.defineProperty(t, key, {
+        get: () => !!s[key],
+        set: (v) => {
+          if (typeof v !== 'boolean') throw new Error(key + ' must be boolean');
+          const why = layerBlocked(topOf(s)._layerSpec);
+          if (why) throw new Error('Target layer cannot be modified (' + why + ')');
+          s[key] = v;
+        },
+        enumerable: true,
+      });
+    }
+    Object.defineProperty(t, 'editable', { get: () => !blocked(s), enumerable: true });
+    Object.defineProperty(t, 'parent', {
+      get: () => {
+        if (s._parentSpec) return proxyOf(s._parentSpec);
+        if (s._layerSpec) return layerProxies.get(s._layerSpec);
+        throw new Error('mock: this object is not in the document');
+      },
+      enumerable: true,
+    });
+    Object.defineProperty(t, 'layer', {
+      get: () => {
+        const ls = topOf(s)._layerSpec;
+        if (!ls) throw new Error('mock: this object is not in the document');
+        return layerProxies.get(ls);
+      },
+      enumerable: true,
+    });
     Object.defineProperty(t, 'selected', {
       get: () => !!s.selected,
       set: (v) => { if (typeof v !== 'boolean') throw new Error('selected must be boolean'); s.selected = v; },
@@ -1047,7 +1383,25 @@ function makeIllustrator(env, fsys) {
       });
     }
     if (s.type === 'GroupItem') {
-      t.clipped = !!s.clipped;
+      Object.defineProperty(t, 'clipped', {
+        get: () => !!s.clipped,
+        set: (v) => {
+          if (typeof v !== 'boolean') throw new Error('clipped must be boolean');
+          assertEditable(s);
+          if (v) {
+            const top = (s.children || []).filter((c) => !c._removed)[0];
+            if (!top || (top.type !== 'PathItem' && top.type !== 'CompoundPathItem')) throw new Error('The top object of a clipping group must be a path');
+            for (const p of top.type === 'PathItem' ? [top] : (top.paths || [])) {
+              p.clipping = true;
+              p.filled = false;
+              p.stroked = false;
+            }
+          }
+          s.clipped = v;
+        },
+        enumerable: true,
+      });
+      Object.defineProperties(t, Object.getOwnPropertyDescriptors(containerApi(s, 'group')));
       const kidsOf = () => (s.children || []).filter((c) => !c._removed).map((c) => c._proxy || makeItem(c));
       Object.defineProperty(t, 'pageItems', { get: () => env.varr(kidsOf()), enumerable: true });
       Object.defineProperty(t, 'textFrames', {
@@ -1056,8 +1410,20 @@ function makeIllustrator(env, fsys) {
       });
       for (const c of s.children || []) c._parentSpec = s;
     }
-    if (s.type === 'PathItem') t.clipping = !!s.clipping;
-    if (s.type === 'CompoundPathItem') t.pathItems = env.varr((s.paths || []).map((c) => makeItem(c)));
+    if (s.type === 'PathItem') {
+      for (const [key, fallback] of [['clipping', false], ['filled', true], ['stroked', true], ['guides', false]]) {
+        Object.defineProperty(t, key, {
+          get: () => (s[key] === undefined ? fallback : !!s[key]),
+          set: (v) => { if (typeof v !== 'boolean') throw new Error(key + ' must be boolean'); s[key] = v; },
+          enumerable: true,
+        });
+      }
+      Object.defineProperty(t, 'pathPoints', { get: () => pathPointsOf(s), enumerable: true });
+    }
+    if (s.type === 'CompoundPathItem') {
+      for (const c of s.paths || []) c._parentSpec = s;
+      Object.defineProperties(t, Object.getOwnPropertyDescriptors(containerApi(s, 'compound')));
+    }
     const allowed = new Set(ITEM_COMMON.concat(ITEM_EXTRA[s.type] || []));
     const proxy = strict(t, allowed, s.type, errors);
     s._proxy = proxy;

@@ -10,7 +10,7 @@ const S = {
   grid: path.join(BASE, 'scripts/GridArrange.jsx'),
   export: path.join(BASE, 'scripts/ExportArtboards.jsx'),
   template: path.join(BASE, 'template/UITemplate.jsx'),
-  align: path.join(BASE, 'scripts/AlignPlus.jsx'),
+  essential: path.join(BASE, 'scripts/COC_illust Essential.jsx'),
 };
 const TMP = path.join(__dirname, 'tmp');
 fs.rmSync(TMP, { recursive: true, force: true });
@@ -876,10 +876,11 @@ test('template: cancel restores, bad number blocks OK, empty selection alerts', 
 });
 
 // ===========================================================================
-//  AlignPlus (palette + BridgeTalk)
+//  COC_illust Essential (palette + BridgeTalk)
 // ===========================================================================
 function openPanel(config) {
-  const env = run(S.align, config);
+  const env = run(S.essential, config);
+  assert.deepStrictEqual(env.tempLeaks(), [], 'temporary copies left in the document');
   const palettes = env.ui.windows.filter((w) => w._state.type === 'palette');
   assert.strictEqual(palettes.length, 1, 'one palette');
   return { env, ui: new Driver(palettes[0], env), win: palettes[0] };
@@ -897,7 +898,7 @@ const boxText = (name, kind, frame, paras) => ({
 const specOf = (env, name) => env.ai.documents[0]._items.find((i) => i._spec.name === name)._spec;
 const liveBounds = (env, name) => Array.from(env.ai.documents[0]._items.find((i) => i._spec.name === name).geometricBounds);
 
-test('align+: opens as a palette once; running again reuses it', () => {
+test('essential: opens as a palette once; running again reuses it', () => {
   const { env, win } = openPanel({ documents: [{}] });
   assert.strictEqual(env.counts.dialogsShown, 0);
   assert.strictEqual(win._state.type, 'palette');
@@ -908,7 +909,7 @@ test('align+: opens as a palette once; running again reuses it', () => {
   assert.strictEqual(env.ui.windows.length, 2, 'new palette after closing the old one');
 });
 
-test('align+: horizontal equal gaps keep both ends, any selection order', () => {
+test('essential: horizontal equal gaps keep both ends, any selection order', () => {
   const g = (170 - 75) / 3;
   const { env, ui } = openPanel({
     documents: [{ selection: [rect('C', 100, 0, 5, 10), rect('A', 0, 0, 10, 10), rect('D', 150, -3, 20, 10), rect('B', 30, 5, 40, 20)] }],
@@ -920,10 +921,10 @@ test('align+: horizontal equal gaps keep both ends, any selection order', () => 
   assertBounds(specOf(env, 'D').bounds, [150, -3, 170, -13], 'D');
   assert.strictEqual(panelStatus(ui), '가로 4개를 간격 11.171 mm로 배열했습니다.');
   for (const c of env.translateCalls) assert.deepStrictEqual(c.flags, [true, false, true, false]);
-  assert.ok(env.bridgeBodies.length === 1 && /^\(function alignPlusCore\(req\)/.test(env.bridgeBodies[0]));
+  assert.ok(env.bridgeBodies.length === 1 && /^\(function cocEssentialCore\(req\)/.test(env.bridgeBodies[0]));
 });
 
-test('align+: vertical equal gaps (top to bottom)', () => {
+test('essential: vertical equal gaps (top to bottom)', () => {
   const { env, ui } = openPanel({
     documents: [{ selection: [rect('R', 2, -100, 10, 5), rect('P', 0, 0, 10, 10), rect('Q', 5, -30, 10, 30)] }],
   });
@@ -934,7 +935,7 @@ test('align+: vertical equal gaps (top to bottom)', () => {
   assert.strictEqual(panelStatus(ui), '세로 3개를 간격 10.583 mm로 배열했습니다.');
 });
 
-test('align+: fixed gap in mm with start / center / end anchors', () => {
+test('essential: fixed gap in mm with start / center / end anchors', () => {
   const gap = 5 * MM;
   const items = () => [rect('A', 0, 0, 10, 10), rect('B', 50, 0, 20, 10), rect('C', 100, 0, 30, 10)];
   const length = 60 + 2 * gap;
@@ -952,7 +953,7 @@ test('align+: fixed gap in mm with start / center / end anchors', () => {
   }
 });
 
-test('align+: too few objects, invalid gap, no document, text editing', () => {
+test('essential: too few objects, invalid gap, no document, text editing', () => {
   let { env, ui } = openPanel({ documents: [{ selection: [rect('A', 0, 0, 1, 1), rect('B', 5, 0, 1, 1)] }] });
   ui.click(ui.button('가로 간격 같게'));
   assert.strictEqual(panelStatus(ui), '객체를 3개 이상 선택하세요.');
@@ -972,7 +973,7 @@ test('align+: too few objects, invalid gap, no document, text editing', () => {
   assert.match(panelStatus(ui), /^텍스트 편집 중입니다/);
 });
 
-test('align+: clipping mask and stroke-inclusive bounds', () => {
+test('essential: clipping mask and stroke-inclusive bounds', () => {
   const clip = () => ({
     type: 'GroupItem', name: 'clip', clipped: true, bounds: [0, 100, 200, -100],
     children: [
@@ -984,15 +985,16 @@ test('align+: clipping mask and stroke-inclusive bounds', () => {
   ui.click(ui.button('가로 간격 같게'));
   assertBounds(specOf(env, 'clip').bounds, [24.5, 100, 224.5, -100], 'clip moved by the mask position (visible bounds)');
   ({ env, ui } = openPanel({ documents: [{ selection: [rect('X', 0, 50, 20, 20), clip(), rect('Y', 150, 50, 20, 20, { stroke: 2 })] }] }));
-  ui.click(ui.find('checkbox', '선 두께까지 포함한 크기로 계산'));
+  ui.click(ui.find('checkbox', '선 두께 포함'));
   ui.click(ui.button('가로 간격 같게'));
   assertBounds(specOf(env, 'clip').bounds, [25, 100, 225, -100], 'clip with geometric bounds');
 });
 
-test('align+: point text keeps its place when justification changes (single and multi-line)', () => {
+test('essential: point text keeps its place when justification changes (single and multi-line)', () => {
   const { env, ui } = openPanel({
     documents: [{ selection: [ptext('one', [100, 50], [[60, 'LEFT']]), ptext('multi', [0, 0], [[100, 'LEFT'], [60, 'LEFT'], [80, 'LEFT']])] }],
   });
+  ui.selectTab('텍스트');
   const before1 = liveBounds(env, 'one');
   const before2 = liveBounds(env, 'multi');
   ui.click(ui.button('가운데'));
@@ -1009,7 +1011,7 @@ test('align+: point text keeps its place when justification changes (single and 
   assert.deepStrictEqual(specOf(env, 'one').text.anchor, [100, 50]);
 });
 
-test('align+: mixed old justification keeps the new side; vertical and rotated text', () => {
+test('essential: mixed old justification keeps the new side; vertical and rotated text', () => {
   const { env, ui } = openPanel({
     documents: [{ selection: [
       ptext('mixed', [0, 0], [[100, 'LEFT'], [50, 'RIGHT']]),
@@ -1017,6 +1019,7 @@ test('align+: mixed old justification keeps the new side; vertical and rotated t
       ptext('rot', [10, 10], [[80, 'LEFT']], { rotation: 30 }),
     ] }],
   });
+  ui.selectTab('텍스트');
   const vert = liveBounds(env, 'vert');
   const rot = liveBounds(env, 'rot');
   ui.click(ui.button('가운데'));
@@ -1026,7 +1029,7 @@ test('align+: mixed old justification keeps the new side; vertical and rotated t
   assertBounds(liveBounds(env, 'rot'), rot, 'rotated single line stays');
 });
 
-test('align+: area and path text are justified in place; justify buttons skip point text', () => {
+test('essential: area and path text are justified in place; justify buttons skip point text', () => {
   const { env, ui } = openPanel({
     documents: [{ selection: [
       boxText('area', 'area', [0, 100, 200, 0], [[150, 'LEFT']]),
@@ -1034,6 +1037,7 @@ test('align+: area and path text are justified in place; justify buttons skip po
       ptext('pt', [500, 0], [[40, 'LEFT']]),
     ] }],
   });
+  ui.selectTab('텍스트');
   ui.click(ui.button('가운데'));
   assert.strictEqual(panelStatus(ui), '가운데 정렬: 포인트 1개(제자리 유지), 영역 1개, 패스 1개(위치 유지 안 됨)');
   assert.deepStrictEqual(specOf(env, 'area').text.frame, [0, 100, 200, 0]);
@@ -1047,29 +1051,33 @@ test('align+: area and path text are justified in place; justify buttons skip po
   assert.strictEqual(specOf(env, 'area').text.paragraphs[0].justification, 'FULLJUSTIFY');
 });
 
-test('align+: text inside groups; non-text selection; locked text reported', () => {
+test('essential: text inside groups; non-text selection; locked text reported', () => {
   const group = { type: 'GroupItem', name: 'grp', bounds: [0, 20, 300, -40], children: [rect('shape', 200, 20, 10, 10), ptext('inner', [0, 0], [[60, 'LEFT']])] };
   let { env, ui } = openPanel({ documents: [{ selection: [group] }] });
   const inner = env.ai.documents[0]._items[0].pageItems[1];
   const before = Array.from(inner.geometricBounds);
+  ui.selectTab('텍스트');
   ui.click(ui.button('오른쪽'));
   assertBounds(Array.from(inner.geometricBounds), before, 'text in group stays');
   assert.strictEqual(panelStatus(ui), '오른쪽 정렬: 포인트 1개(제자리 유지)');
 
   ({ env, ui } = openPanel({ documents: [{ selection: [rect('a', 0, 0, 1, 1)] }] }));
+  ui.selectTab('텍스트');
   ui.click(ui.button('가운데'));
   assert.strictEqual(panelStatus(ui), '텍스트를 선택하세요. (그룹 안의 텍스트도 됩니다)');
 
   ({ env, ui } = openPanel({ documents: [{ selection: [ptext('ok', [0, 0], [[50, 'LEFT']]), ptext('locked', [0, 50], [[50, 'LEFT']], {}), rect('r', 0, 0, 1, 1)] }] }));
   specOf(env, 'locked').locked = true;
+  ui.selectTab('텍스트');
   ui.click(ui.button('가운데'));
   assert.strictEqual(panelStatus(ui), '가운데 정렬: 포인트 1개(제자리 유지) / 1개 실패');
 });
 
-test('align+: editing text changes only the selected paragraphs; a bare cursor changes the story', () => {
+test('essential: editing text changes only the selected paragraphs; a bare cursor changes the story', () => {
   let { env, ui } = openPanel({
     documents: [{ selection: [ptext('edit', [0, 0], [[100, 'LEFT'], [60, 'LEFT']])], textEditing: { item: 0, paragraphs: [1], length: 4 } }],
   });
+  ui.selectTab('텍스트');
   ui.click(ui.button('가운데'));
   const m = specOf(env, 'edit').text;
   assert.deepStrictEqual(m.paragraphs.map((p) => p.justification), ['LEFT', 'CENTER']);
@@ -1080,23 +1088,25 @@ test('align+: editing text changes only the selected paragraphs; a bare cursor c
     documents: [{ selection: [ptext('caret', [0, 0], [[100, 'LEFT'], [60, 'LEFT']])], textEditing: { item: 0, length: 0 } }],
   }));
   const before = liveBounds(env, 'caret');
+  ui.selectTab('텍스트');
   ui.click(ui.button('오른쪽'));
   assert.deepStrictEqual(specOf(env, 'caret').text.paragraphs.map((p) => p.justification), ['RIGHT', 'RIGHT']);
   assertBounds(liveBounds(env, 'caret'), before, 'caret: whole story, box stays');
 });
 
-test('align+: falls back to per-paragraph changes and skips empty paragraphs', () => {
+test('essential: falls back to per-paragraph changes and skips empty paragraphs', () => {
   const { env, ui } = openPanel({
     documents: [{ selection: [ptext('fb', [0, 0], [[80, 'LEFT'], { empty: true }], { rangeSetThrows: true })] }],
   });
   const before = liveBounds(env, 'fb');
+  ui.selectTab('텍스트');
   ui.click(ui.button('가운데'));
   assert.deepStrictEqual(specOf(env, 'fb').text.paragraphs.map((p) => p.justification), ['CENTER', 'LEFT']);
   assertBounds(liveBounds(env, 'fb'), before, 'stays');
 });
 
-test('align+: settings and window position are remembered; unit switch converts the gap', () => {
-  const root = fs.mkdtempSync(path.join(TMP, 'align-persist-'));
+test('essential: settings and window position are remembered; unit switch converts the gap', () => {
+  const root = fs.mkdtempSync(path.join(TMP, 'essential-persist-'));
   let { ui, win } = openPanel({ root, documents: [{}] });
   ui.click(ui.find('radiobutton', '직접 입력'));
   ui.type(ui.after('간격:', 'edittext'), '3');
@@ -1113,17 +1123,343 @@ test('align+: settings and window position are remembered; unit switch converts 
   assert.deepStrictEqual(Array.from(win.location), [300, 200]);
 });
 
-test('align+: off-screen saved position falls back to centre', () => {
-  const root = fs.mkdtempSync(path.join(TMP, 'align-offscreen-'));
+test('essential: off-screen saved position falls back to centre', () => {
+  const root = fs.mkdtempSync(path.join(TMP, 'essential-offscreen-'));
   fs.mkdirSync(path.join(root, 'userData/IllustratorUIScripts'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'userData/IllustratorUIScripts/AlignPlus.ini'), 'windowX=5000\nwindowY=100');
-  const ini = fs.readFileSync(path.join(root, 'userData/IllustratorUIScripts/AlignPlus.ini'), 'utf8');
+  fs.writeFileSync(path.join(root, 'userData/IllustratorUIScripts/COC_illust_Essential.ini'), 'windowX=5000\nwindowY=100');
+  const ini = fs.readFileSync(path.join(root, 'userData/IllustratorUIScripts/COC_illust_Essential.ini'), 'utf8');
   assert.strictEqual(ini.split('\n').length, 2, 'two settings lines');
   let { win } = openPanel({ root, documents: [{}] });
   assert.deepStrictEqual(Array.from(win.location), [100, 100], 'not moved off-screen');
-  fs.writeFileSync(path.join(root, 'userData/IllustratorUIScripts/AlignPlus.ini'), 'windowX=640\nwindowY=480');
+  fs.writeFileSync(path.join(root, 'userData/IllustratorUIScripts/COC_illust_Essential.ini'), 'windowX=640\nwindowY=480');
   ({ win } = openPanel({ root, documents: [{}] }));
   assert.deepStrictEqual(Array.from(win.location), [640, 480], 'on-screen position restored');
+});
+
+// ---- COC_illust Essential: new features ------------------------------------
+const rotRect = (name, cx, cy, w, h, angle, extra) => Object.assign({ type: 'PathItem', name, geo: { cx, cy, w, h }, angle, bounds: [0, 0, 0, 0] }, extra || {});
+const placed = (name, cx, cy, w, h, angle, extra) => Object.assign(rotRect(name, cx, cy, w, h, angle, extra), { type: 'PlacedItem' });
+const raster = (name, cx, cy, w, h, angle, extra) => Object.assign(rotRect(name, cx, cy, w, h, angle, extra), { type: 'RasterItem' });
+const noLeaks = (env) => assert.deepStrictEqual(env.tempLeaks(), [], 'temporary copies left in the document');
+const tagAngle = (spec) => {
+  const tag = spec.tags.find((t) => t.name === 'BBAccumRotation');
+  return tag ? parseFloat(tag.value) * 180 / Math.PI : null;
+};
+const center = (b) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+const turn = (p, c, deg) => {
+  const th = deg * Math.PI / 180;
+  return [c[0] + (p[0] - c[0]) * Math.cos(th) - (p[1] - c[1]) * Math.sin(th), c[1] + (p[0] - c[0]) * Math.sin(th) + (p[1] - c[1]) * Math.cos(th)];
+};
+
+test('essential: eyedropper reads the gap between two objects and applies it elsewhere, exactly', () => {
+  const { env, ui } = openPanel({
+    documents: [{
+      selection: [rect('L1', 0, 0, 10, 10), rect('L2', 25, 3, 10, 10)],
+      unselected: [rect('X', 0, -50, 10, 10), rect('Y', 30, -50, 20, 10), rect('Z', 100, -50, 5, 10)],
+    }],
+  });
+  ui.click(ui.button('스포이드'));
+  assert.strictEqual(ui.after('간격:', 'edittext').text, '5.292');
+  assert.strictEqual(ui.find('radiobutton', '직접 입력')._state.value, true);
+  assert.strictEqual(panelStatus(ui), '가로 간격을 가져왔습니다: 5.292 mm\n다른 객체를 선택하고 [가로 간격 같게]를 누르세요.');
+  env.ai.documents[0]._select(['X', 'Y', 'Z']);
+  ui.click(ui.button('가로 간격 같게'));
+  assertBounds(specOf(env, 'X').bounds, [0, -50, 10, -60], 'X stays');
+  assertBounds(specOf(env, 'Y').bounds, [25, -50, 45, -60], 'Y exactly 15 pt after X');
+  assertBounds(specOf(env, 'Z').bounds, [60, -50, 65, -60], 'Z exactly 15 pt after Y');
+  // typing a new value replaces the picked one
+  ui.type(ui.after('간격:', 'edittext'), '10');
+  ui.click(ui.button('가로 간격 같게'));
+  assert.ok(near(specOf(env, 'Y').bounds[0], 10 + 10 * MM));
+  noLeaks(env);
+});
+
+test('essential: eyedropper picks the vertical gap, reports overlap, needs exactly two objects', () => {
+  let { env, ui } = openPanel({ documents: [{ selection: [rect('A', 0, 0, 10, 10), rect('B', 2, -18, 10, 10)] }] });
+  ui.select(ui.after('간격:', 'dropdownlist'), 2);
+  ui.click(ui.button('스포이드'));
+  assert.strictEqual(ui.after('간격:', 'edittext').text, '8');
+  assert.match(panelStatus(ui), /^세로 간격을 가져왔습니다: 8 pt\n/);
+  ({ env, ui } = openPanel({ documents: [{ selection: [rect('A', 0, 0, 10, 10), rect('B', 5, -5, 10, 10)] }] }));
+  ui.select(ui.after('간격:', 'dropdownlist'), 2);
+  ui.click(ui.button('스포이드'));
+  assert.match(panelStatus(ui), /^가로 간격을 가져왔습니다: -5 pt \(겹쳐 있음\)/);
+  ({ env, ui } = openPanel({ documents: [{ selection: [rect('A', 0, 0, 1, 1), rect('B', 5, 0, 1, 1), rect('C', 9, 0, 1, 1)] }] }));
+  ui.click(ui.button('스포이드'));
+  assert.strictEqual(panelStatus(ui), '간격을 잴 두 객체를 선택하세요.');
+});
+
+test('essential: tidy up finds rows and columns and uses the average gaps', () => {
+  // two rough rows; E is bigger. Row gaps 12, 9 / 9, 5 → 8.75 pt; row distance 18 pt
+  const { env, ui } = openPanel({
+    documents: [{ selection: [
+      rect('E', 20, -29, 20, 12), rect('A', 0, 0, 10, 10), rect('F', 45, -31, 10, 10),
+      rect('C', 41, -1, 10, 10), rect('D', 1, -30, 10, 10), rect('B', 22, 1, 10, 10),
+    ] }],
+  });
+  ui.click(ui.button('격자로 정리'));
+  assertBounds(specOf(env, 'A').bounds, [0, 1, 10, -9], 'A');
+  assertBounds(specOf(env, 'B').bounds, [23.75, 1, 33.75, -9], 'B centred in the wide column');
+  assertBounds(specOf(env, 'C').bounds, [47.5, 1, 57.5, -9], 'C');
+  assertBounds(specOf(env, 'D').bounds, [0, -28, 10, -38], 'D centred in the tall row');
+  assertBounds(specOf(env, 'E').bounds, [18.75, -27, 38.75, -39], 'E');
+  assertBounds(specOf(env, 'F').bounds, [47.5, -28, 57.5, -38], 'F');
+  assert.strictEqual(panelStatus(ui), '격자로 정리했습니다: 6개, 2행 × 3열\n간격 가로 3.087 mm · 세로 6.35 mm');
+});
+
+test('essential: tidy up with a typed gap centres a single row', () => {
+  const g = 5 * MM;
+  const { env, ui } = openPanel({ documents: [{ selection: [rect('A', 0, 0, 10, 10), rect('B', 20, 5, 10, 20), rect('C', 45, -2, 10, 6)] }] });
+  ui.click(ui.find('radiobutton', '직접 입력'));
+  ui.type(ui.after('간격:', 'edittext'), '5');
+  ui.click(ui.button('격자로 정리'));
+  assertBounds(specOf(env, 'A').bounds, [0, 0, 10, -10], 'A');
+  assertBounds(specOf(env, 'B').bounds, [10 + g, 5, 20 + g, -15], 'B');
+  assertBounds(specOf(env, 'C').bounds, [20 + 2 * g, -2, 30 + 2 * g, -8], 'C');
+  assert.match(panelStatus(ui), /1행 × 3열\n간격 가로 5 mm · 세로 5 mm$/);
+});
+
+test('essential: match size (width to largest, height to smallest with ratio, both sides to the top object)', () => {
+  const items = () => [rect('A', 0, 0, 10, 20), rect('B', 50, 0, 30, 15), rect('C', 100, 0, 20, 40)];
+  let { env, ui } = openPanel({ documents: [{ selection: items() }] });
+  ui.selectTab('크기 · 회전');
+  ui.click(ui.find('checkbox', '비율 유지')); // on by default → off
+  ui.click(ui.button('크기 맞추기'));
+  assertBounds(specOf(env, 'A').bounds, [-10, 0, 20, -20], 'A width 30 around its centre');
+  assertBounds(specOf(env, 'B').bounds, [50, 0, 80, -15], 'B is the reference');
+  assertBounds(specOf(env, 'C').bounds, [95, 0, 125, -40], 'C width 30');
+  assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 2개 → 폭 10.583 mm');
+
+  ({ env, ui } = openPanel({ documents: [{ selection: items() }] }));
+  ui.selectTab('크기 · 회전');
+  ui.select(ui.after('맞출 크기:', 'dropdownlist'), 1);
+  ui.select(ui.after('기준 객체:', 'dropdownlist'), 1);
+  ui.click(ui.button('크기 맞추기'));
+  assertBounds(specOf(env, 'A').bounds, [1.25, -2.5, 8.75, -17.5], 'A height 15, ratio kept');
+  assertBounds(specOf(env, 'C').bounds, [106.25, -12.5, 113.75, -27.5], 'C height 15, ratio kept');
+  assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 2개 → 높이 5.292 mm');
+
+  ({ env, ui } = openPanel({ documents: [{ selection: items() }] }));
+  ui.selectTab('크기 · 회전');
+  ui.select(ui.after('맞출 크기:', 'dropdownlist'), 2);
+  ui.select(ui.after('기준 객체:', 'dropdownlist'), 2);
+  ui.click(ui.button('크기 맞추기'));
+  assertBounds(specOf(env, 'B').bounds, [60, -5, 70, -10], 'B fits inside 10 × 20 (ratio kept)');
+  assertBounds(specOf(env, 'C').bounds, [105, -10, 115, -30], 'C becomes 10 × 20');
+  ui.click(ui.find('checkbox', '비율 유지'));
+  ui.click(ui.button('크기 맞추기'));
+  assertBounds(specOf(env, 'B').bounds, [60, 2.5, 70, -17.5], 'B exactly 10 × 20 without ratio');
+  assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 2개 → 폭 3.528 mm · 높이 7.056 mm');
+});
+
+test('essential: match size corrects for strokes and skips zero-size objects', () => {
+  let { env, ui } = openPanel({ documents: [{ selection: [rect('S', 0, 0, 10, 10, { stroke: 2 }), rect('BIG', 50, 0, 30, 30)] }] });
+  ui.selectTab('크기 · 회전');
+  ui.click(ui.button('크기 맞추기'));
+  const vb = Array.from(env.ai.documents[0]._items[0].visibleBounds);
+  assert.ok(Math.abs(vb[2] - vb[0] - 30) < 0.01, 'visible width 30 incl. stroke, got ' + (vb[2] - vb[0]));
+  assert.ok(env.resizeCalls.length >= 2 && env.resizeCalls.length <= 4, 'corrected in a few passes');
+
+  ({ env, ui } = openPanel({ documents: [{ selection: [rect('line', 0, 0, 0, 20), rect('A', 10, 0, 10, 10), rect('B', 30, 0, 20, 10)] }] }));
+  ui.selectTab('크기 · 회전');
+  ui.click(ui.button('크기 맞추기'));
+  assert.strictEqual(panelStatus(ui), '크기를 맞췄습니다: 1개 → 폭 7.056 mm\n크기가 0이라 건너뛴 객체 1개');
+});
+
+test('essential: reset rotation for paths (tag), text and images (matrix), mirrored images', () => {
+  const pathText = () => {
+    const t = Object.assign(boxText('PT', 'path', [1000, 10, 1060, 0], [[50, 'LEFT']]), { tagAngle: 30 });
+    Object.assign(t.text, { rotation: 30, fixedMatrix: true });
+    return t;
+  };
+  const selection = () => [
+    rotRect('P', 0, 0, 20, 10, 30, { tagAngle: 30 }),
+    ptext('T', [200, 0], [[60, 'LEFT'], [30, 'LEFT']], { rotation: 20 }),
+    placed('I', 400, 0, 40, 20, -15),
+    placed('M', 500, 0, 40, 20, 30, { flip: true }),
+    rotRect('Q', 600, 0, 10, 10, 0),
+    raster('R0', 700, 0, 40, 20, 0),
+    raster('R', 800, 0, 40, 20, 25),
+    raster('RM', 900, 0, 40, 20, 30, { flip: true }),
+    pathText(),
+  ];
+  for (const matrixSign of [1, -1]) {
+    const { env, ui } = openPanel({ matrixSign, documents: [{ selection: selection() }] });
+    const t0 = liveBounds(env, 'T');
+    const anchor0 = specOf(env, 'T').text.anchor.slice();
+    ui.selectTab('크기 · 회전');
+    ui.click(ui.button('0°로 초기화'));
+    assert.ok(near(specOf(env, 'P').angle, 0), 'P straight');
+    assert.strictEqual(tagAngle(specOf(env, 'P')), null, 'P tag cleared');
+    assert.ok(near(specOf(env, 'T').text.rotation, 0), 'T straight (matrix sign ' + matrixSign + ')');
+    const expected = turn(anchor0, center(t0), -20);
+    assert.ok(near(specOf(env, 'T').text.anchor[0], expected[0]) && near(specOf(env, 'T').text.anchor[1], expected[1]),
+      'T turned about its centre without drift');
+    assert.ok(near(specOf(env, 'I').angle, 0), 'I straight');
+    assert.ok(near(specOf(env, 'M').angle, 0) && specOf(env, 'M').flip === true, 'mirrored image straight, still mirrored');
+    assert.ok(near(specOf(env, 'Q').angle, 0), 'Q untouched');
+    assert.ok(near(specOf(env, 'R0').angle, 0), 'straight embedded image not turned upside down (its matrix is flipped)');
+    assert.ok(near(specOf(env, 'R').angle, 0), 'embedded image straight');
+    assert.ok(near(specOf(env, 'RM').angle, 0) && specOf(env, 'RM').flip === true, 'mirrored embedded image straight');
+    assert.ok(near(specOf(env, 'PT').text.rotation, 0) && tagAngle(specOf(env, 'PT')) === null,
+      'text whose matrix does not follow rotation falls back to the tag');
+    noLeaks(env);
+    assert.strictEqual(panelStatus(ui), '회전을 0°로 초기화했습니다: 8개\n회전 정보가 없는 1개는 그대로 두었습니다.');
+  }
+});
+
+test('essential: match the top object angle, set a typed angle, report locked objects', () => {
+  let { env, ui } = openPanel({
+    documents: [{ selection: [rotRect('TOP', 0, 0, 20, 10, 45, { tagAngle: 45 }), rotRect('Q', 50, 0, 20, 10, 10, { tagAngle: 10 }), ptext('T', [100, 0], [[40, 'LEFT']])] }],
+  });
+  ui.selectTab('크기 · 회전');
+  ui.click(ui.button('맨 위 객체 각도로'));
+  assert.ok(near(specOf(env, 'Q').angle, 45) && near(tagAngle(specOf(env, 'Q')), 45), 'Q at 45°, tag updated');
+  assert.ok(near(specOf(env, 'T').text.rotation, 45) && near(tagAngle(specOf(env, 'T')), 45), 'T at 45°');
+  assert.ok(near(specOf(env, 'TOP').angle, 45), 'reference untouched');
+  assert.strictEqual(panelStatus(ui), '맨 위 객체 각도(45°)로 맞췄습니다: 2개');
+
+  ui.type(ui.after('각도:', 'edittext'), 'abc');
+  ui.click(ui.button('각도 적용'));
+  assert.strictEqual(panelStatus(ui), '각도는 숫자로 입력해 주세요.');
+  ui.type(ui.after('각도:', 'edittext'), '-15');
+  ui.click(ui.button('각도 적용'));
+  for (const n of ['TOP', 'Q']) assert.ok(near(specOf(env, n).angle, -15) && near(tagAngle(specOf(env, n)), -15), n + ' at -15°');
+  assert.ok(near(specOf(env, 'T').text.rotation, -15), 'T at -15°');
+  assert.strictEqual(panelStatus(ui), '-15°로 맞췄습니다: 3개');
+
+  ({ env, ui } = openPanel({ documents: [{ selection: [rotRect('A', 0, 0, 10, 10, 20, { tagAngle: 20 }), rotRect('L', 50, 0, 10, 10, 20, { tagAngle: 20, locked: true })] }] }));
+  ui.selectTab('크기 · 회전');
+  ui.click(ui.button('0°로 초기화'));
+  assert.strictEqual(panelStatus(ui), '회전을 0°로 초기화했습니다: 1개\n1개 실패 (잠긴 객체?)');
+  ({ env, ui } = openPanel({ documents: [{ selection: [rotRect('A', 0, 0, 10, 10, 20)] }] }));
+  ui.selectTab('크기 · 회전');
+  ui.click(ui.button('맨 위 객체 각도로'));
+  assert.strictEqual(panelStatus(ui), '객체를 2개 이상 선택하세요.');
+});
+
+test('essential: baseline alignment of point text (left, top, bottom, average) and other objects', () => {
+  const texts = () => [ptext('T2', [50, 97], [[20, 'LEFT']]), ptext('T1', [0, 100], [[20, 'LEFT']]), ptext('T3', [100, 103], [[20, 'LEFT']])];
+  const cases = [[0, 100], [1, 103], [2, 97], [3, 100]];
+  for (const [index, y] of cases) {
+    const { env, ui } = openPanel({ documents: [{ selection: texts() }] });
+    ui.selectTab('텍스트');
+    ui.select(ui.after('기준선 위치:', 'dropdownlist'), index);
+    ui.click(ui.button('기준선 맞추기'));
+    for (const n of ['T1', 'T2', 'T3']) assert.ok(near(specOf(env, n).text.anchor[1], y), `${n} baseline ${y} (option ${index})`);
+    assert.strictEqual(panelStatus(ui), '기준선을 맞췄습니다: 텍스트 3개');
+  }
+  let { env, ui } = openPanel({
+    documents: [{ selection: texts().concat([rect('icon', 150, 120, 20, 15), boxText('area', 'area', [0, 50, 100, 0], [[80, 'LEFT']])]) }],
+  });
+  ui.selectTab('텍스트');
+  ui.click(ui.find('checkbox', '텍스트가 아닌 객체는 아랫변을 맞춤'));
+  ui.click(ui.button('기준선 맞추기'));
+  assertBounds(specOf(env, 'icon').bounds, [150, 115, 170, 100], 'icon bottom on the baseline');
+  assertBounds(specOf(env, 'area').text.frame, [0, 50, 100, 0], 'area text not moved');
+  assert.strictEqual(panelStatus(ui), '기준선을 맞췄습니다: 텍스트 3개, 객체 1개\n영역 · 패스 · 세로 텍스트 1개는 제외했습니다.');
+  ({ env, ui } = openPanel({ documents: [{ selection: [boxText('area', 'area', [0, 50, 100, 0], [[80, 'LEFT']]), rect('r', 0, 0, 1, 1)] }] }));
+  ui.selectTab('텍스트');
+  ui.click(ui.button('기준선 맞추기'));
+  assert.strictEqual(panelStatus(ui), '가로쓰기 포인트 텍스트를 선택하세요.');
+});
+
+test('essential: word spacing tracks only the spaces (set, +/-, reset, emoji, editing range)', () => {
+  let { env, ui } = openPanel({
+    documents: [{ selection: [ptext('W', [0, 0], [[100, 'LEFT']], { contents: 'Hello World Foo　Bar' })] }],
+  });
+  ui.selectTab('텍스트');
+  ui.type(ui.after('값:', 'edittext'), '-50');
+  const before = env.counts.charAccess;
+  ui.click(ui.button('적용'));
+  const m = specOf(env, 'W').text;
+  const spaces = [5, 11, 15];
+  m.tracking.forEach((v, i) => assert.strictEqual(v, spaces.includes(i) ? -50 : 0, 'char ' + i));
+  assert.strictEqual(env.counts.charAccess - before, 3, 'only the spaces were touched');
+  assert.strictEqual(panelStatus(ui), '어간 -50 적용: 띄어쓰기 3개');
+  ui.click(ui.button('+10'));
+  assert.strictEqual(m.tracking[5], -40);
+  assert.strictEqual(ui.after('값:', 'edittext').text, '-40');
+  ui.click(ui.button('-10'));
+  ui.click(ui.button('-10'));
+  assert.strictEqual(m.tracking[11], -60);
+  ui.click(ui.button('0으로'));
+  assert.ok(m.tracking.every((v) => v === 0));
+  assert.strictEqual(ui.after('값:', 'edittext').text, '0');
+
+  ({ env, ui } = openPanel({ documents: [{ selection: [ptext('E', [0, 0], [[100, 'LEFT']], { contents: 'A😀 B C' })] }] }));
+  ui.selectTab('텍스트');
+  ui.type(ui.after('값:', 'edittext'), '100');
+  ui.click(ui.button('적용'));
+  assert.deepStrictEqual(specOf(env, 'E').text.tracking, [0, 0, 100, 0, 100, 0], 'emoji counted as one character');
+
+  ({ env, ui } = openPanel({
+    documents: [{ selection: [ptext('R', [0, 0], [[100, 'LEFT']], { contents: 'one two three' })], textEditing: { item: 0, start: 0, length: 5 } }],
+  }));
+  ui.selectTab('텍스트');
+  ui.type(ui.after('값:', 'edittext'), '30');
+  ui.click(ui.button('적용'));
+  assert.deepStrictEqual(specOf(env, 'R').text.tracking.map((v, i) => (v ? i : -1)).filter((i) => i >= 0), [3], 'only the space inside the edited range');
+
+  ({ env, ui } = openPanel({ documents: [{ selection: [ptext('N', [0, 0], [[100, 'LEFT']], { contents: 'NoSpaces' })] }] }));
+  ui.selectTab('텍스트');
+  ui.click(ui.button('적용'));
+  assert.strictEqual(panelStatus(ui), '선택한 텍스트에 띄어쓰기가 없습니다.');
+  ui.type(ui.after('값:', 'edittext'), 'x');
+  ui.click(ui.button('적용'));
+  assert.strictEqual(panelStatus(ui), '어간 값은 숫자로 입력해 주세요. (예: -50, 100)');
+});
+
+test('essential: glyph-shape measuring for spacing and the eyedropper (text and text in groups)', () => {
+  const texts = () => [
+    ptext('T1', [0, 0], [[30, 'LEFT']]),
+    ptext('T2', [50, 0], [[60, 'LEFT']], { glyphInset: [10, 2, 0, 3] }),
+    ptext('T3', [150, 0], [[20, 'LEFT']]),
+  ];
+  let { env, ui } = openPanel({ documents: [{ selection: texts() }] });
+  ui.click(ui.button('가로 간격 같게'));
+  assert.ok(near(specOf(env, 'T2').text.anchor[0], 60), 'text boxes: T2 moves 10');
+  ({ env, ui } = openPanel({ documents: [{ selection: texts() }] }));
+  ui.click(ui.find('checkbox', '글자 모양 기준'));
+  ui.click(ui.button('가로 간격 같게'));
+  assert.ok(near(specOf(env, 'T2').text.anchor[0], 55), 'letter shapes: T2 moves 5');
+  noLeaks(env);
+
+  const group = () => ({
+    type: 'GroupItem', name: 'G', bounds: [0, 0, 30, -15],
+    children: [rect('gr', 0, 0, 10, 10), ptext('gt', [0, -12], [[30, 'LEFT']], { glyphInset: [0.5, 2, 5, 3] })],
+  });
+  ({ env, ui } = openPanel({ documents: [{ selection: [group(), rect('R', 40, 0, 10, 10)] }] }));
+  ui.select(ui.after('간격:', 'dropdownlist'), 2);
+  ui.click(ui.button('스포이드'));
+  assert.strictEqual(ui.after('간격:', 'edittext').text, '10', 'group box');
+  ui.click(ui.find('checkbox', '글자 모양 기준'));
+  ui.click(ui.button('스포이드'));
+  assert.strictEqual(ui.after('간격:', 'edittext').text, '15', 'group with outlined text');
+  noLeaks(env);
+});
+
+test('essential: tabs, remembered tab and options', () => {
+  const root = fs.mkdtempSync(path.join(TMP, 'essential-tabs-'));
+  let { ui, win } = openPanel({ root, documents: [{}] });
+  assert.throws(() => ui.click(ui.button('기준선 맞추기')), /not selected/);
+  ui.selectTab('텍스트');
+  ui.click(ui.find('checkbox', '글자 모양 기준'));
+  ui.selectTab('크기 · 회전');
+  ui.select(ui.after('맞출 크기:', 'dropdownlist'), 2);
+  win.close();
+  ({ ui, win } = openPanel({ root, documents: [{}] }));
+  assert.strictEqual(ui.find('tab', '크기 · 회전')._state.parent.selection._state.text, '크기 · 회전');
+  assert.strictEqual(ui.find('checkbox', '글자 모양 기준')._state.value, true);
+  assert.strictEqual(ui.after('맞출 크기:', 'dropdownlist').selection.index, 2);
+
+  // Opening must not save: the window has no position yet, so the saved one would be lost.
+  const ini = path.join(root, 'userData/IllustratorUIScripts/COC_illust_Essential.ini');
+  fs.writeFileSync(ini, 'tab=2\nwindowX=640\nwindowY=480');
+  ({ ui, win } = openPanel({ root, documents: [{}] }));
+  assert.strictEqual(fs.readFileSync(ini, 'utf8'), 'tab=2\nwindowX=640\nwindowY=480', 'settings untouched by opening');
+  assert.strictEqual(ui.find('tab', '텍스트')._state.parent.selection._state.text, '텍스트');
+  assert.deepStrictEqual(Array.from(win.location), [640, 480]);
 });
 
 // ===========================================================================

@@ -181,6 +181,13 @@ class UI {
       selection: {
         get: () => state._selection,
         set: (v) => {
+          if (type === 'tabbedpanel') {
+            if (!Array.from(state.children).includes(v)) throw new Error('tabbedpanel.selection must be one of its tabs');
+            const changed = v !== state._selection;
+            state._selection = v;
+            if (changed && typeof proxy.onChange === 'function') proxy.onChange();
+            return;
+          }
           let item = null;
           if (v === null || v === undefined) item = null;
           else if (typeof v === 'number') {
@@ -357,7 +364,10 @@ class Driver {
     const siblings = Array.from(label._state.parent._state.children);
     const idx = siblings.indexOf(label);
     for (let i = idx + 1; i < siblings.length; i++) {
-      if (!type || siblings[i]._state.type === type) return siblings[i];
+      // the control itself, or the first match inside a following group
+      let hit = null;
+      walk(siblings[i], (c) => { if (!hit && (!type || c._state.type === type)) hit = c; });
+      if (hit) return hit;
     }
     throw new Error(`no ${type} after label ${labelText}`);
   }
@@ -368,7 +378,11 @@ class Driver {
     while (p) {
       if (!p._state.enabled) throw new Error(`control disabled: ${p._state.type} ${p._state.text}`);
       if (!p._state.visible) throw new Error(`control hidden: ${p._state.type} ${p._state.text}`);
-      p = p._state.parent;
+      const parent = p._state.parent;
+      if (parent && parent._state.type === 'tabbedpanel' && parent._state._selection !== p) {
+        throw new Error(`control is on tab '${p._state.text}', which is not selected`);
+      }
+      p = parent;
     }
   }
 
@@ -414,6 +428,10 @@ class Driver {
   }
 
   button(text) { return this.find('button', text); }
+  selectTab(title) {
+    const tab = this.find('tab', title);
+    tab._state.parent.selection = tab;
+  }
   ok(text) { this.click(this.button(text)); }
   cancel() { this.click(this.button('취소')); }
   texts() { return this.all('statictext').map((c) => c._state.text); }
@@ -613,6 +631,7 @@ function makeIllustrator(env, fsys) {
     Justification: enumOf('Justification', { CENTER: 2, FULLJUSTIFY: 6, FULLJUSTIFYLASTLINECENTER: 5, FULLJUSTIFYLASTLINELEFT: 3, FULLJUSTIFYLASTLINERIGHT: 4, LEFT: 0, RIGHT: 1 }, errors),
     TextType: enumOf('TextType', { AREATEXT: 1, PATHTEXT: 2, POINTTEXT: 0 }, errors),
     TextOrientation: enumOf('TextOrientation', { HORIZONTAL: 0, VERTICAL: 1 }, errors),
+    Transformation: enumOf('Transformation', { BOTTOM: 7, BOTTOMLEFT: 4, BOTTOMRIGHT: 10, CENTER: 6, DOCUMENTORIGIN: 1, LEFT: 3, RIGHT: 9, TOP: 5, TOPLEFT: 2, TOPRIGHT: 8 }, errors),
   };
   const JUST_NAMES = Object.keys(E.Justification);
   const justName = (v) => {
@@ -651,7 +670,7 @@ function makeIllustrator(env, fsys) {
     },
     preferences: strict({
       getBooleanPreference(key) {
-        const prefs = env.config.prefs || { includeStrokeInBounds: true, transformPatterns: false };
+        const prefs = env.config.prefs || { includeStrokeInBounds: true, transformPatterns: false, scaleLineWeight: false };
         if (!(key in prefs)) throw new Error('unknown preference ' + key);
         return prefs[key];
       },
@@ -677,7 +696,8 @@ function makeIllustrator(env, fsys) {
       activeArtboard = i;
     };
     const layers = makeLayers(spec.layers || [{ name: 'Layer 1' }]);
-    const items = (spec.selection || []).map((s) => makeItem(s));
+    const items = (spec.selection || []).concat(spec.unselected || []).map((s) => makeItem(s));
+    let selected = items.slice(0, (spec.selection || []).length);
     const fileAbs = spec.file ? path.join(env.root, spec.file) : null;
     if (fileAbs) {
       fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
@@ -700,7 +720,15 @@ function makeIllustrator(env, fsys) {
       get selection() {
         if (spec.textEditing && typeof spec.textEditing === 'object') return editingRange(items, spec.textEditing);
         if (spec.textEditing) return strict({ typename: 'TextRange', length: 5, contents: 'hello' }, new Set(['typename', 'length', 'contents']), 'TextRange', errors);
-        return env.varr(items);
+        return env.varr(selected);
+      },
+      // tests: change the selection by object names
+      _select(names) {
+        selected = names.map((n) => {
+          const hit = items.find((it) => it._spec.name === n);
+          if (!hit) throw new Error('no item named ' + n);
+          return hit;
+        });
       },
       activeLayer: layers[0],
       _items: items,
@@ -757,7 +785,7 @@ function makeIllustrator(env, fsys) {
       },
     };
     const proxy = strict(d, new Set(['name', 'fullName', 'path', 'saved', 'rulerUnits', 'artboards', 'layers', 'selection',
-      'activeLayer', 'activate', 'exportFile', 'exportForScreens', '_items', '_artboards', '_layers', '_exports',
+      'activeLayer', 'activate', 'exportFile', 'exportForScreens', '_items', '_artboards', '_layers', '_exports', '_select',
       '_activeArtboard']), 'Document', errors);
     return proxy;
   }
@@ -797,65 +825,236 @@ function makeIllustrator(env, fsys) {
     }));
   }
 
-  const ITEM_COMMON = ['typename', 'name', 'geometricBounds', 'visibleBounds', 'translate', 'locked', 'hidden', 'parent',
-    'layer', 'left', 'top', 'width', 'height', 'position', 'uuid', '_spec'];
+  const ITEM_COMMON = ['typename', 'name', 'geometricBounds', 'visibleBounds', 'translate', 'rotate', 'resize',
+    'duplicate', 'remove', 'selected', 'tags', 'locked', 'hidden', 'parent', 'layer', 'left', 'top', 'width', 'height',
+    'position', 'uuid', 'editable', '_spec'];
   const ITEM_EXTRA = {
-    TextFrame: ['contents', 'textRange', 'kind', 'orientation', 'paragraphs', 'story', 'anchor', 'lines'],
-    GroupItem: ['clipped', 'pageItems', 'pathItems', 'compoundPathItems'],
+    TextFrame: ['contents', 'textRange', 'kind', 'orientation', 'paragraphs', 'story', 'anchor', 'lines', 'matrix',
+      'createOutline', 'characters', 'words'],
+    GroupItem: ['clipped', 'pageItems', 'pathItems', 'compoundPathItems', 'textFrames'],
     PathItem: ['clipping', 'filled', 'stroked', 'strokeWidth'],
     CompoundPathItem: ['pathItems'],
+    PlacedItem: ['matrix', 'file'],
+    RasterItem: ['matrix'],
   };
 
-  function makeItem(s) {
+  // Objects made by duplicate()/createOutline() are temporary in these scripts and must be removed again.
+  const temps = [];
+  env.tempLeaks = () => temps.filter((t) => !t._removed).map((t) => t.name || t.type);
+  env.counts.charAccess = 0;
+
+  // ---- geometry model -------------------------------------------------------
+  // Plain objects: s.geo = { cx, cy, w, h } (unrotated size) and s.angle (degrees, counter-clockwise).
+  // Text: s.text (see below). Group copies made by duplicate(): bounds = union of their children.
+  function rotatePoint(p, c, deg) {
+    const th = deg * Math.PI / 180;
+    const x = p[0] - c[0];
+    const y = p[1] - c[1];
+    return [c[0] + x * Math.cos(th) - y * Math.sin(th), c[1] + x * Math.sin(th) + y * Math.cos(th)];
+  }
+  function geoBounds(g, angle) {
+    const xs = [];
+    const ys = [];
+    for (const [x, y] of [[-g.w / 2, -g.h / 2], [g.w / 2, -g.h / 2], [g.w / 2, g.h / 2], [-g.w / 2, g.h / 2]]) {
+      const p = rotatePoint([g.cx + x, g.cy + y], [g.cx, g.cy], angle);
+      xs.push(p[0]);
+      ys.push(p[1]);
+    }
+    return [Math.min(...xs), Math.max(...ys), Math.max(...xs), Math.min(...ys)];
+  }
+  function unionBounds(list) {
+    const live = list.filter((c) => !c._removed);
+    if (!live.length) return [0, 0, 0, 0];
+    live.forEach(refresh);
+    return [Math.min(...live.map((c) => c.bounds[0])), Math.max(...live.map((c) => c.bounds[1])),
+      Math.max(...live.map((c) => c.bounds[2])), Math.min(...live.map((c) => c.bounds[3]))];
+  }
+  function refresh(s) {
     if (s.text) s.bounds = textBounds(s.text);
+    else if (s.derived) s.bounds = unionBounds(s.children || []);
+    else if (s.geo) s.bounds = geoBounds(s.geo, s.angle || 0);
+  }
+  function shiftSpec(s, dx, dy) {
+    if (s.text) {
+      const m = s.text;
+      if (m.kind === 'point') m.anchor = [m.anchor[0] + dx, m.anchor[1] + dy];
+      else m.frame = [m.frame[0] + dx, m.frame[1] + dy, m.frame[2] + dx, m.frame[3] + dy];
+    }
+    if (s.geo) {
+      s.geo.cx += dx;
+      s.geo.cy += dy;
+    }
+    for (const c of s.children || []) shiftSpec(c, dx, dy);
+    refresh(s);
+  }
+  function rotateSpec(s, deg, center) {
+    if (s.text) {
+      const m = s.text;
+      m.rotation = (m.rotation || 0) + deg;
+      if (m.kind === 'point') {
+        m.anchor = rotatePoint(m.anchor, center, deg);
+      } else {
+        const f = m.frame;
+        const c = rotatePoint([(f[0] + f[2]) / 2, (f[1] + f[3]) / 2], center, deg);
+        const hw = (f[2] - f[0]) / 2;
+        const hh = (f[1] - f[3]) / 2;
+        m.frame = [c[0] - hw, c[1] + hh, c[0] + hw, c[1] - hh];
+      }
+    }
+    if (s.geo) {
+      const c = rotatePoint([s.geo.cx, s.geo.cy], center, deg);
+      s.geo.cx = c[0];
+      s.geo.cy = c[1];
+      s.angle = (s.angle || 0) + deg;
+    }
+    for (const c of s.children || []) rotateSpec(c, deg, center);
+    refresh(s);
+  }
+  function scaleSpec(s, sx, sy, center, lines) {
+    const scaleAround = (p) => [center[0] + (p[0] - center[0]) * sx, center[1] + (p[1] - center[1]) * sy];
+    if (s.text) {
+      const m = s.text;
+      if (m.kind === 'point') {
+        for (const p of m.paragraphs) p.width *= sx;
+        m.leading = (m.leading || 12) * sy;
+        m.ascent = (m.ascent === undefined ? 9 : m.ascent) * sy;
+        m.descent = (m.descent === undefined ? 3 : m.descent) * sy;
+        m.anchor = scaleAround(m.anchor);
+      } else {
+        const a = scaleAround([m.frame[0], m.frame[1]]);
+        const b = scaleAround([m.frame[2], m.frame[3]]);
+        m.frame = [a[0], a[1], b[0], b[1]];
+      }
+    }
+    if (s.geo) {
+      const c = scaleAround([s.geo.cx, s.geo.cy]);
+      s.geo = { cx: c[0], cy: c[1], w: s.geo.w * sx, h: s.geo.h * sy };
+    }
+    if (s.stroke) s.stroke *= lines / 100;
+    for (const c of s.children || []) scaleSpec(c, sx, sy, center, lines);
+    refresh(s);
+  }
+  function removeSpec(s) {
+    s._removed = true;
+    for (const c of s.children || []) removeSpec(c);
+  }
+  function cloneSpec(s, parent) {
+    const out = {};
+    for (const [k, v] of Object.entries(s)) {
+      if (k.startsWith('_') || typeof v === 'function') continue;
+      if (k === 'children') continue;
+      out[k] = JSON.parse(JSON.stringify(v === undefined ? null : v));
+    }
+    if (s.children) {
+      out.children = s.children.filter((c) => !c._removed).map((c) => cloneSpec(c, out));
+      out.derived = true;
+    }
+    if (parent) out._parentSpec = parent;
+    return out;
+  }
+
+  function checkFlags(name, flags) {
+    for (const b of flags) if (typeof b !== 'boolean') throw new Error(name + ': flags must be boolean');
+  }
+  function aboutPoint(s, about) {
+    if (about === E.Transformation.DOCUMENTORIGIN) return [0, 0];
+    if (about !== E.Transformation.CENTER) throw new Error('expected Transformation.CENTER or DOCUMENTORIGIN');
+    refresh(s);
+    return [(s.bounds[0] + s.bounds[2]) / 2, (s.bounds[1] + s.bounds[3]) / 2];
+  }
+
+  function makeItem(s) {
+    if (!s.text && !s.geo && s.bounds && !s.derived) {
+      const b = s.bounds;
+      s.geo = { cx: (b[0] + b[2]) / 2, cy: (b[1] + b[3]) / 2, w: b[2] - b[0], h: b[1] - b[3] };
+    }
+    if (s.angle === undefined) s.angle = 0;
+    if (!s.tags) s.tags = s.tagAngle !== undefined ? [{ name: 'BBAccumRotation', value: String(s.tagAngle * Math.PI / 180) }] : [];
+    refresh(s);
     s.bounds = s.bounds.slice();
-    const stroke = s.stroke || 0;
     const t = {
       typename: s.type,
       get geometricBounds() {
-        if (s.text) s.bounds = textBounds(s.text);
+        if (s._removed) throw new Error('object was removed');
+        refresh(s);
         return env.varr(s.bounds);
       },
       get visibleBounds() {
-        if (s.text) s.bounds = textBounds(s.text);
+        refresh(s);
+        const stroke = s.stroke || 0;
         const b = s.bounds;
         return env.varr([b[0] - stroke / 2, b[1] + stroke / 2, b[2] + stroke / 2, b[3] - stroke / 2]);
       },
       translate(dx, dy, objects, fillPatterns, fillGradients, strokePattern) {
         if (arguments.length !== 6) throw new Error('translate expects 6 args in these scripts');
         if (typeof dx !== 'number' || typeof dy !== 'number' || !isFinite(dx) || !isFinite(dy)) throw new Error('translate: bad delta');
-        for (const b of [objects, fillPatterns, fillGradients, strokePattern]) if (typeof b !== 'boolean') throw new Error('translate: flags must be boolean');
+        checkFlags('translate', [objects, fillPatterns, fillGradients, strokePattern]);
         if (s.locked) throw new Error('Target layer cannot be modified');
         env.translateCalls.push({ name: s.name, dx, dy, flags: [objects, fillPatterns, fillGradients, strokePattern] });
-        if (s.text) {
-          const m = s.text;
-          if (m.kind === 'point') m.anchor = [m.anchor[0] + dx, m.anchor[1] + dy];
-          else m.frame = [m.frame[0] + dx, m.frame[1] + dy, m.frame[2] + dx, m.frame[3] + dy];
-        }
-        s.bounds = [s.bounds[0] + dx, s.bounds[1] + dy, s.bounds[2] + dx, s.bounds[3] + dy];
-        if (s.children) for (const c of s.children) c._shift(dx, dy);
+        shiftSpec(s, dx, dy);
+      },
+      rotate(angle, changePositions, fillPatterns, fillGradients, strokePattern, about) {
+        if (arguments.length !== 6) throw new Error('rotate expects 6 args in these scripts');
+        if (typeof angle !== 'number' || !isFinite(angle)) throw new Error('rotate: bad angle');
+        checkFlags('rotate', [changePositions, fillPatterns, fillGradients, strokePattern]);
+        if (s.locked) throw new Error('Target layer cannot be modified');
+        env.rotateCalls.push({ name: s.name, angle });
+        rotateSpec(s, angle, aboutPoint(s, about));
+      },
+      resize(sx, sy, changePositions, fillPatterns, fillGradients, strokePattern, lines, about) {
+        if (arguments.length !== 8) throw new Error('resize expects 8 args in these scripts');
+        for (const v of [sx, sy, lines]) if (typeof v !== 'number' || !isFinite(v) || v <= 0) throw new Error('resize: bad scale ' + v);
+        checkFlags('resize', [changePositions, fillPatterns, fillGradients, strokePattern]);
+        if (s.locked) throw new Error('Target layer cannot be modified');
+        env.resizeCalls.push({ name: s.name, sx, sy, lines });
+        scaleSpec(s, sx / 100, sy / 100, aboutPoint(s, about), lines);
+      },
+      duplicate() {
+        if (arguments.length) throw new Error('mock: duplicate() without arguments only');
+        const copy = cloneSpec(s, null);
+        copy._temp = true;
+        temps.push(copy);
+        return makeItem(copy);
+      },
+      remove() {
+        removeSpec(s);
       },
       locked: !!s.locked,
       hidden: false,
+      editable: !s.locked,
       _spec: s,
     };
+    Object.defineProperty(t, 'selected', {
+      get: () => !!s.selected,
+      set: (v) => { if (typeof v !== 'boolean') throw new Error('selected must be boolean'); s.selected = v; },
+      enumerable: true,
+    });
     Object.defineProperty(t, 'name', {
       get: () => s.name || '',
       set: (v) => { if (typeof v !== 'string') throw new Error('name must be string'); s.name = v; },
       enumerable: true,
     });
+    Object.defineProperty(t, 'tags', { get: () => tagsOf(s), enumerable: true });
+    if (s.type === 'TextFrame' || s.type === 'PlacedItem' || s.type === 'RasterItem') {
+      Object.defineProperty(t, 'matrix', { get: () => matrixOf(s), enumerable: true });
+    }
     if (s.type === 'TextFrame' && s.text) addTextModel(t, s);
     if (s.type === 'TextFrame') {
       Object.defineProperty(t, 'contents', {
-        get: () => s.contents,
+        get: () => (s.text && s.text.contents !== undefined ? s.text.contents : s.contents),
         set: (v) => { if (typeof v !== 'string') throw new Error('contents must be string'); s.contents = v; },
         enumerable: true,
       });
     }
     if (s.type === 'GroupItem') {
       t.clipped = !!s.clipped;
-      const kids = (s.children || []).map((c) => makeChild(c));
-      t.pageItems = env.varr(kids);
+      const kidsOf = () => (s.children || []).filter((c) => !c._removed).map((c) => c._proxy || makeItem(c));
+      Object.defineProperty(t, 'pageItems', { get: () => env.varr(kidsOf()), enumerable: true });
+      Object.defineProperty(t, 'textFrames', {
+        get: () => env.varr(kidsOf().filter((p) => p._spec.type === 'TextFrame')),
+        enumerable: true,
+      });
+      for (const c of s.children || []) c._parentSpec = s;
     }
     if (s.type === 'PathItem') t.clipping = !!s.clipping;
     if (s.type === 'CompoundPathItem') t.pathItems = env.varr((s.paths || []).map((c) => makeItem(c)));
@@ -865,9 +1064,53 @@ function makeIllustrator(env, fsys) {
     return proxy;
   }
 
+  function tagsOf(s) {
+    const coll = env.varr(s.tags.map((tg) => tagProxy(s, tg)));
+    coll.getByName = (name) => {
+      const tg = s.tags.find((x) => x.name === name);
+      if (!tg) throw new Error('No such element');
+      return tagProxy(s, tg);
+    };
+    coll.add = () => {
+      const tg = { name: '', value: '' };
+      s.tags.push(tg);
+      return tagProxy(s, tg);
+    };
+    return coll;
+  }
+  function tagProxy(s, tg) {
+    const o = {};
+    Object.defineProperty(o, 'name', { get: () => tg.name, set: (v) => { tg.name = String(v); }, enumerable: true });
+    Object.defineProperty(o, 'value', {
+      get: () => tg.value,
+      set: (v) => { if (typeof v !== 'string') throw new Error('tag value must be a string'); tg.value = v; },
+      enumerable: true,
+    });
+    o.remove = () => {
+      const i = s.tags.indexOf(tg);
+      if (i >= 0) s.tags.splice(i, 1);
+    };
+    return strict(o, new Set(['name', 'value', 'remove', 'typename', 'parent']), 'Tag', errors);
+  }
+  // Matrix of text / images. config.matrixSign = -1 simulates a matrix that reports the opposite rotation sign.
+  // Embedded images (RasterItem) carry a vertical flip even when nobody mirrored them, like in Illustrator.
+  // s.text.fixedMatrix simulates text whose matrix does not follow rotation (e.g. text on a path).
+  function matrixOf(s) {
+    const deg = s.text ? (s.text.fixedMatrix ? 0 : s.text.rotation || 0) : (s.angle || 0);
+    const th = (env.config.matrixSign || 1) * deg * Math.PI / 180;
+    const fx = s.flip ? -1 : 1;
+    const fy = s.type === 'RasterItem' ? -1 : 1;
+    const m = {
+      mValueA: Math.cos(th) * fx, mValueB: Math.sin(th) * fx, mValueC: -Math.sin(th) * fy, mValueD: Math.cos(th) * fy,
+      mValueTX: 0, mValueTY: 0,
+    };
+    return strict(m, new Set(Object.keys(m)), 'Matrix', errors);
+  }
+
   // ---- text model -----------------------------------------------------------
   // s.text = { kind: 'point'|'area'|'path', orientation: 'h'|'v', rotation: deg, anchor: [x, y] (point text),
-  //            frame: [l, t, r, b] (area/path), leading, ascent, descent,
+  //            frame: [l, t, r, b] (area/path), leading, ascent, descent, contents, tracking[],
+  //            glyphInset: [l, t, r, b] (how much smaller the letter shapes are than the text box),
   //            paragraphs: [{ width, justification: 'LEFT'|..., empty }] }
   // Point text lines are placed around the anchor according to their justification, like Illustrator does.
   const LINE_OFFSET = { LEFT: 0, CENTER: 0.5, RIGHT: 1 };
@@ -902,6 +1145,66 @@ function makeIllustrator(env, fsys) {
     return [minX, maxY, maxX, minY];
   }
 
+  function outlineOf(s) {
+    const m = s.text;
+    removeSpec(s); // the text frame is replaced by its outlines
+    const empty = m.paragraphs.every((p) => p.empty) || m.contents === '';
+    const b = textBounds(m);
+    const inset = m.glyphInset || [0.5, 2, 0.5, 3];
+    const glyph = [b[0] + inset[0], b[1] - inset[1], b[2] - inset[2], b[3] + inset[3]];
+    const outline = {
+      type: 'GroupItem', name: (s.name || '') + ' outlines', derived: true, bounds: glyph, _temp: true,
+      children: empty ? [] : [{ type: 'PathItem', name: 'glyphs', bounds: glyph }],
+    };
+    temps.push(outline);
+    const parent = s._parentSpec;
+    if (parent && parent.children) {
+      parent.children[parent.children.indexOf(s)] = outline;
+      outline._parentSpec = parent;
+    }
+    return makeItem(outline);
+  }
+
+  function codePoints(m) {
+    if (m.contents === undefined) m.contents = 'text';
+    const cps = Array.from(m.contents);
+    if (!m.tracking || m.tracking.length !== cps.length) m.tracking = cps.map((c, i) => (m.tracking && m.tracking[i]) || 0);
+    return cps;
+  }
+
+  function charObject(m, index) {
+    env.counts.charAccess++;
+    const cps = codePoints(m);
+    const attrs = {};
+    Object.defineProperty(attrs, 'tracking', {
+      get: () => m.tracking[index],
+      set: (v) => {
+        if (typeof v !== 'number' || !isFinite(v)) throw new Error('tracking must be a number');
+        m.tracking[index] = v;
+      },
+      enumerable: true,
+    });
+    const ch = { contents: cps[index], length: 1, characterAttributes: strict(attrs, new Set(['tracking', 'size']), 'CharacterAttributes', errors) };
+    return strict(ch, new Set(['contents', 'length', 'characterAttributes']), 'Character', errors);
+  }
+
+  // Characters collection: indexing creates character objects lazily, like DOM calls in Illustrator.
+  function charactersOf(m, start, length) {
+    const cps = codePoints(m);
+    const n = Math.min(length, cps.length - start);
+    return new Proxy({}, {
+      get(t, prop) {
+        if (prop === 'length') return n;
+        if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+          const i = Number(prop);
+          if (i >= n) throw new Error('No such element');
+          return charObject(m, start + i);
+        }
+        throw new Error('[Characters] unknown property ' + String(prop));
+      },
+    });
+  }
+
   function paragraphObject(m, p) {
     const attrs = {};
     Object.defineProperty(attrs, 'justification', {
@@ -917,7 +1220,7 @@ function makeIllustrator(env, fsys) {
     return strict(para, new Set(['length', 'paragraphAttributes', 'contents']), 'Paragraph', errors);
   }
 
-  function rangeObject(m, paragraphs, length, story) {
+  function rangeObject(m, paragraphs, start, length, story) {
     const attrs = {};
     Object.defineProperty(attrs, 'justification', {
       get: () => E.Justification[paragraphs[0].justification],
@@ -935,8 +1238,11 @@ function makeIllustrator(env, fsys) {
       paragraphAttributes: strict(attrs, new Set(['justification']), 'ParagraphAttributes', errors),
       paragraphs: env.varr(paragraphs.map((p) => paragraphObject(m, p))),
     };
+    Object.defineProperty(r, 'contents', { get: () => codePoints(m).slice(start, start + length).join(''), enumerable: true });
+    Object.defineProperty(r, 'characters', { get: () => charactersOf(m, start, length), enumerable: true });
     Object.defineProperty(r, 'story', { get: () => story(), enumerable: true });
-    return strict(r, new Set(['typename', 'length', 'paragraphAttributes', 'paragraphs', 'story', 'contents', 'characterAttributes', 'parent']), 'TextRange', errors);
+    return strict(r, new Set(['typename', 'length', 'paragraphAttributes', 'paragraphs', 'story', 'contents', 'characters',
+      'characterAttributes', 'parent']), 'TextRange', errors);
   }
 
   function addTextModel(t, s) {
@@ -944,14 +1250,16 @@ function makeIllustrator(env, fsys) {
     const kinds = { point: E.TextType.POINTTEXT, area: E.TextType.AREATEXT, path: E.TextType.PATHTEXT };
     t.kind = kinds[m.kind];
     t.orientation = m.orientation === 'v' ? E.TextOrientation.VERTICAL : E.TextOrientation.HORIZONTAL;
+    const whole = () => rangeObject(m, m.paragraphs, 0, codePoints(m).length, story);
     const story = () => strict({
       get textFrames() { return env.varr([s._proxy]); },
-      get textRange() { return rangeObject(m, m.paragraphs, 10, story); },
+      get textRange() { return whole(); },
     }, new Set(['textFrames', 'textRange', 'paragraphs']), 'Story', errors);
-    Object.defineProperty(t, 'textRange', { get: () => rangeObject(m, m.paragraphs, 10, story), enumerable: true });
+    Object.defineProperty(t, 'textRange', { get: whole, enumerable: true });
     Object.defineProperty(t, 'paragraphs', { get: () => env.varr(m.paragraphs.map((p) => paragraphObject(m, p))), enumerable: true });
     Object.defineProperty(t, 'story', { get: () => story(), enumerable: true });
     Object.defineProperty(t, 'anchor', { get: () => env.varr(m.anchor || [0, 0]), enumerable: true });
+    t.createOutline = () => outlineOf(s);
     m._story = story;
   }
 
@@ -960,13 +1268,7 @@ function makeIllustrator(env, fsys) {
     const s = items[e.item || 0]._spec;
     const m = s.text;
     const paragraphs = (e.paragraphs || m.paragraphs.map((p, i) => i)).map((i) => m.paragraphs[i]);
-    return rangeObject(m, paragraphs, e.length === undefined ? 3 : e.length, m._story);
-  }
-
-  function makeChild(c) {
-    const p = makeItem(c);
-    c._shift = (dx, dy) => { c.bounds = [c.bounds[0] + dx, c.bounds[1] + dy, c.bounds[2] + dx, c.bounds[3] + dy]; };
-    return p;
+    return rangeObject(m, paragraphs, e.start || 0, e.length === undefined ? 3 : e.length, m._story);
   }
 
   return { app: appProxy, enums: E, classes, addDocument, documents };
@@ -979,7 +1281,7 @@ function runScript(scriptPath, config) {
   const root = config.root || fs.mkdtempSync(path.join(config.tmpBase || os.tmpdir(), 'ai-mock-'));
   const { ctx, varr } = createRealm();
   const env = {
-    root, config, varr, errors: [], log: [], alerts: [], dialogs: [], executed: [], translateCalls: [],
+    root, config, varr, errors: [], log: [], alerts: [], dialogs: [], executed: [], translateCalls: [], rotateCalls: [], resizeCalls: [],
     counts: { redraw: 0, dialogsShown: 0, windowUpdate: 0 },
   };
   if (config.setup) config.setup(env);

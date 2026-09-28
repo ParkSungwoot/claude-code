@@ -1,0 +1,13 @@
+{
+  "name": "illustrator-ui-scripts-dev",
+  "private": true,
+  "description": "Mock ExtendScript/ScriptUI/Illustrator environment used to test the .jsx scripts without Illustrator",
+  "scripts": {
+    "test": "node lint.js && node encoding.js && node tests.js"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0",
+    "acorn-walk": "^8.3.4",
+    "iconv-lite": "^0.7.0"
+  }
+}

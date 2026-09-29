@@ -713,14 +713,16 @@ function runScript(scriptPath, config) {
     if (btns.length !== 1) throw new Error(`expected exactly one button, found ${btns.length}`);
     return btns[0];
   };
-  // click 'Safe Delete' (opts.ctrl / opts.cmd hold the modifier key)
+  // click 'Safe Delete' (opts.ctrl / opts.cmd / opts.shift hold the modifier keys)
   env.click = (opts) => {
     sui.keyboardState.ctrlKey = !!(opts && opts.ctrl);
     sui.keyboardState.metaKey = !!(opts && opts.cmd);
+    sui.keyboardState.shiftKey = !!(opts && opts.shift);
     const before = env.dialogs.length;
     env.button().onClick();
     sui.keyboardState.ctrlKey = false;
     sui.keyboardState.metaKey = false;
+    sui.keyboardState.shiftKey = false;
     return env.dialogs.length > before ? env.dialogs[env.dialogs.length - 1] : null;
   };
   env.win = win;

@@ -58,7 +58,7 @@ test('palette: running from File > Scripts shows a palette window', () => {
   finish(env);
 });
 
-test('no comp / no selection: explains what to do, changes nothing', () => {
+test('no comp / empty comp: explains what to do, changes nothing', () => {
   let env = run({ comps: [{ name: 'Main', layers: [hidden('A')] }], active: null });
   env.click();
   assert.strictEqual(env.alerts.length, 1);
@@ -66,9 +66,9 @@ test('no comp / no selection: explains what to do, changes nothing', () => {
   assert.deepStrictEqual(env.ae.names('Main'), ['A']);
   finish(env, { alerts: true });
 
-  env = run({ comps: [{ name: 'Main', layers: [hidden('A')] }], select: [] });
-  env.click();
-  has(env.alerts[0].msg, '선택');
+  env = run({ comps: [{ name: 'Main', layers: [] }] });
+  env.click({ shift: true });
+  has(env.alerts[0].msg, '"Main" 컴포지션에 레이어가 없습니다');
   assert.deepStrictEqual(env.ae.undo, []);
   finish(env, { alerts: true });
 });
@@ -566,6 +566,181 @@ test('ctrl+click: if AE would not follow the rename in expressions, the name is 
   finish(env);
   assert.deepStrictEqual(env.ae.names('Main'), ['Ctrl', 'P (#Parent)', 'Box']);
   has(d.body, '태그를 붙이지 않은 레이어: "Ctrl"(#1)');
+});
+
+// ===========================================================================
+//  nothing selected: the whole comp (click) / nested precomps too (Shift + click)
+// ===========================================================================
+test('nothing selected: every layer of the comp is checked, safe ones are deleted', () => {
+  const r = del({
+    comps: [{
+      name: 'Main',
+      layers: [
+        nul('Ctrl'), visible('Box', { parent: 'Ctrl' }), hidden('Old 1'), nul('Rig'), hidden('Rigged', { parent: 'Rig' }),
+        visible('Logo'), { name: 'BGM', kind: 'audio' }, hidden('Locked', { locked: true }), { name: 'Cam', kind: 'camera' },
+      ],
+    }],
+    select: [],
+  });
+  assert.deepStrictEqual(r.names, ['Ctrl', 'Box', 'Logo', 'BGM', 'Locked']);
+  assert.deepStrictEqual(r.d.head, [
+    '"Main" 컴포지션의 모든 레이어를 검사했습니다.',
+    '레이어 9개 중 4개를 삭제했고, 5개는 삭제하지 않았습니다.',
+  ]);
+  has(r.d.body, '[컴포지션] "Main" — 삭제 4개 · 남김 5개\n' +
+    '    ■ 삭제함 (4)\n        - "Old 1"\n        - "Rig"\n        - "Rigged"\n        - "Cam"\n' +
+    '    ■ 삭제하지 않음 (5)\n        - 화면에 보이거나 소리가 나는 레이어 3개\n' +
+    '        - "Ctrl"(#1)\n            • [부모] "Box"(#2) 레이어의 부모입니다.\n' +
+    '        - "Locked"(#5)\n            • [잠금]');
+  // visible layers are summed up, not listed one by one
+  hasNot(r.d.body, '"Logo"');
+  has(r.d.body, '※ 같이 지운 레이어끼리의 연결');
+});
+
+test('nothing selected: a report is shown even when nothing could be deleted', () => {
+  const r = del({ comps: [{ name: 'Main', layers: [visible('A'), visible('B')] }], select: [] });
+  assert.deepStrictEqual(r.names, ['A', 'B']);
+  has(r.d.head[1], '레이어 2개 중 0개를 삭제했고, 2개는 삭제하지 않았습니다.');
+  hasNot(r.d.body, '■ 삭제함');
+});
+
+test('nothing selected: a hidden solo layer is kept, since the visible layers stay', () => {
+  const r = del({ comps: [{ name: 'Main', layers: [hidden('S', { solo: true }), visible('A'), hidden('Junk')] }], select: [] });
+  assert.deepStrictEqual(r.names, ['S', 'A']);
+  has(r.d.body, '[솔로] 솔로(Solo)가 켜진 레이어입니다. 지우면 솔로가 풀려 숨어 있던 레이어 1개가 다시 보이게 됩니다.');
+  // a visible solo layer always stays, so the hidden one can go
+  const r2 = del({ comps: [{ name: 'Main', layers: [hidden('S', { solo: true }), visible('A', { solo: true }), visible('B')] }], select: [] });
+  assert.deepStrictEqual(r2.names, ['A', 'B']);
+});
+
+test('nothing selected + Ctrl: only layers kept for a reason get tags, visible ones keep their names', () => {
+  const env = run({
+    comps: [{
+      name: 'Main',
+      layers: [nul('Ctrl'), visible('Box', { parent: 'Ctrl', expr: { 'Transform > Position': 'thisComp.layer("Ctrl").position' } }), hidden('Old')],
+    }],
+    select: [],
+  });
+  const d = env.click({ ctrl: true });
+  finish(env);
+  assert.deepStrictEqual(env.ae.names('Main'), ['Ctrl (#Parent)(#Exp_Target)', 'Box']);
+  has(d.head.join('\n'), '이유 태그를 붙였습니다');
+});
+
+test('Shift + click with a selection only handles the selection', () => {
+  const env = run({
+    comps: [{ name: 'Pre', layers: [hidden('Inner')] }, { name: 'Main', layers: [{ name: 'P', kind: 'precomp', source: 'Pre' }, hidden('A'), hidden('B')] }],
+    select: ['A'],
+  });
+  assert.strictEqual(env.click({ shift: true }), null);
+  finish(env);
+  assert.deepStrictEqual(env.ae.names('Main'), ['P', 'B']);
+  assert.deepStrictEqual(env.ae.names('Pre'), ['Inner']);
+});
+
+const nested = () => [
+  { name: 'Deep', layers: [visible('Leaf'), hidden('Deep Junk')] },
+  { name: 'Mid', layers: [{ name: 'Deep', kind: 'precomp', source: 'Deep' }, hidden('Mid Junk'), nul('Mid Ctrl'), visible('Mid Art', { parent: 'Mid Ctrl' })] },
+  { name: 'Side', layers: [hidden('Side Junk')] },
+  {
+    name: 'Main',
+    layers: [
+      { name: 'Mid', kind: 'precomp', source: 'Mid' }, { name: 'Mid again', kind: 'precomp', source: 'Mid', enabled: false },
+      hidden('Main Junk'), visible('Title', { kind: 'text' }),
+    ],
+  },
+  { name: 'Unrelated', layers: [hidden('Other Junk')] },
+];
+
+test('Shift + click with nothing selected: cleans nested precomps all the way down', () => {
+  const env = run({ comps: nested(), select: [] });
+  const d = env.click({ shift: true });
+  finish(env);
+  assert.deepStrictEqual(env.ae.names('Main'), ['Mid', 'Title']);
+  assert.deepStrictEqual(env.ae.names('Mid'), ['Deep', 'Mid Ctrl', 'Mid Art']);
+  assert.deepStrictEqual(env.ae.names('Deep'), ['Leaf']);
+  // comps that are not inside the active comp are left alone
+  assert.deepStrictEqual(env.ae.names('Side'), ['Side Junk']);
+  assert.deepStrictEqual(env.ae.names('Unrelated'), ['Other Junk']);
+  assert.deepStrictEqual(d.head, [
+    '"Main" 컴포지션과 그 안의 프리컴프 2개까지 모든 레이어를 검사했습니다.',
+    '레이어 10개 중 4개를 삭제했고, 6개는 삭제하지 않았습니다.',
+  ]);
+  // parent comp first, each comp once even when it is used twice
+  const order = d.body.split('\n').filter((l) => /^\[컴포지션\]/.test(l));
+  assert.deepStrictEqual(order, [
+    '[컴포지션] "Main" — 삭제 2개 · 남김 2개',
+    '[컴포지션] "Mid" — 삭제 1개 · 남김 3개',
+    '[컴포지션] "Deep" — 삭제 1개 · 남김 1개',
+  ]);
+  has(d.body, '        - "Mid Ctrl"(#2)\n            • [부모] "Mid Art"(#3) 레이어의 부모입니다.');
+  // a single undo step for everything
+  assert.deepStrictEqual(env.ae.undo, ['begin:COC Safe Delete', 'end']);
+});
+
+test('Shift + click: plain click on the same project only touches the active comp', () => {
+  const env = run({ comps: nested(), select: [] });
+  env.click();
+  finish(env);
+  assert.deepStrictEqual(env.ae.names('Main'), ['Mid', 'Title']);
+  assert.deepStrictEqual(env.ae.names('Mid'), ['Deep', 'Mid Junk', 'Mid Ctrl', 'Mid Art']);
+  assert.deepStrictEqual(env.ae.names('Deep'), ['Leaf', 'Deep Junk']);
+});
+
+test('Shift + click: goes round again when deleting in one comp frees a layer in another', () => {
+  const env = run({
+    comps: [
+      // Reader (hidden, unused) in the precomp is the only thing that uses Main's Ctrl
+      { name: 'Pre', layers: [visible('Art'), hidden('Reader', { expr: { 'Transform > Position': 'comp("Main").layer("Ctrl").position' } })] },
+      { name: 'Main', layers: [{ name: 'Pre', kind: 'precomp', source: 'Pre' }, nul('Ctrl')] },
+    ],
+    select: [],
+  });
+  const d = env.click({ shift: true });
+  finish(env);
+  assert.deepStrictEqual(env.ae.names('Main'), ['Pre']);
+  assert.deepStrictEqual(env.ae.names('Pre'), ['Art']);
+  has(d.head[1], '레이어 4개 중 2개를 삭제했고, 2개는 삭제하지 않았습니다.');
+  has(d.body, '[컴포지션] "Main" — 삭제 1개 · 남김 1개\n    ■ 삭제함 (1)\n        - "Ctrl"');
+});
+
+test('Ctrl + Shift + click: tags in every nested comp', () => {
+  const env = run({ comps: nested(), select: [] });
+  const d = env.click({ ctrl: true, shift: true });
+  finish(env);
+  assert.deepStrictEqual(env.ae.names('Mid'), ['Deep', 'Mid Ctrl (#Parent)', 'Mid Art']);
+  assert.deepStrictEqual(env.ae.names('Main'), ['Mid', 'Title']);
+  has(d.head.join('\n'), '이유 태그를 붙였습니다');
+});
+
+test('camera / light without 3D layers are kept when a layer uses a plug-in that can read them', () => {
+  const comp = (fx) => ({
+    comps: [{ name: 'Main', layers: [{ name: 'Cam', kind: 'camera' }, { name: 'Key', kind: 'light' }, visible('FX', { effects: [fx] })] }],
+    select: ['Cam', 'Key'],
+  });
+  let r = del(comp({ name: 'Particular', matchName: 'tc Particular' }));
+  assert.deepStrictEqual(r.names, ['Cam', 'Key', 'FX']);
+  has(r.d.body, '[카메라] 3D 레이어는 없지만, 컴포지션 카메라를 쓸 수 있는 이펙트("Particular" 등)가 있는 레이어 1개("FX"(#3))가 있습니다.');
+  has(r.d.body, '[라이트] 3D 레이어는 없지만, 컴포지션 라이트를 쓸 수 있는 이펙트("Particular" 등)');
+  r = del(comp({ name: 'Shatter', matchName: 'ADBE Shatter' }));
+  assert.deepStrictEqual(r.names, ['Cam', 'Key', 'FX']);
+  r = del(comp({ name: 'Gaussian Blur', matchName: 'ADBE Gaussian Blur 2' }));
+  assert.deepStrictEqual(r.names, ['FX']);
+  r = del(comp({ name: 'Particular', matchName: 'tc Particular', enabled: false }));
+  assert.deepStrictEqual(r.names, ['FX']);
+});
+
+test('many layers: a 300-layer comp is cleaned in one go', () => {
+  const layers = [];
+  for (let i = 0; i < 100; i++) {
+    layers.push(nul('Ctrl ' + i), visible('Art ' + i, { parent: 'Ctrl ' + i }), hidden('Junk ' + i));
+  }
+  const t0 = Date.now();
+  const r = del({ comps: [{ name: 'Main', layers }], select: [] });
+  const ms = Date.now() - t0;
+  assert.strictEqual(r.names.length, 200);
+  has(r.d.head[1], '레이어 300개 중 100개를 삭제했고, 200개는 삭제하지 않았습니다.');
+  assert.ok(ms < 20000, `took ${ms} ms`);
 });
 
 // ===========================================================================

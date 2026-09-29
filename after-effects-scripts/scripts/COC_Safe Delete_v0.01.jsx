@@ -5,9 +5,12 @@
  *  선택한 레이어를 지워도 컴포지션에 영향이 없는지 먼저 검사하고,
  *  영향이 없는 레이어만 삭제합니다. 지우면 안 되는 레이어는 이유를 알려 주고 남겨 둡니다.
  *
- *  [Safe Delete]             검사 후 안전한 레이어만 삭제
- *  [Ctrl(Mac: Cmd) + 클릭]   위와 같이 삭제하고, 남긴 레이어 이름 끝에 이유 태그를 붙임
- *                            예) Null 1 (#Parent)(#Exp_Target)
+ *  레이어를 선택하고 클릭          선택한 레이어만 검사해서, 안전한 것만 삭제
+ *  아무것도 선택하지 않고 클릭     지금 컴포지션의 모든 레이어를 정리
+ *  아무것도 선택하지 않고 Shift+클릭  안에 든 프리컴프까지 끝까지 모두 정리
+ *  Ctrl(Mac: Cmd)을 함께 누르면    위와 같이 정리한 뒤, 남긴 레이어 이름 끝에 이유 태그를 붙임
+ *                                  예) Null 1 (#Parent)(#Exp_Target)
+ *                                  (컴포지션 전체를 정리할 때는 보이거나 소리 나는 레이어 이름은 그대로)
  *
  *  지우지 않는 경우 (태그)
  *   - 잠긴 레이어                                           (#Locked)
@@ -29,6 +32,7 @@
  *   - 하나뿐인 솔로 레이어 (지우면 숨은 레이어가 다시 보임)     (#Solo)
  *  다른 컴포지션의 익스프레션(comp("이름").layer(...))까지 프로젝트 전체를 검사합니다.
  *  여러 개를 함께 지울 때는, 같이 지워지는 레이어끼리의 연결은 문제로 보지 않습니다.
+ *  3D 레이어가 없어도 Particular · Element 3D 같은 이펙트가 있으면 카메라 · 라이트는 남깁니다.
  *
  *  설치 : After Effects 폴더의 Scripts/ScriptUI Panels 에 넣고 AE 재시작
  *         → 창(Window) 메뉴 맨 아래에서 이 스크립트를 열어 도킹
@@ -172,18 +176,6 @@
     if (type === TrackMatteType.LUMA) return '루마 매트';
     if (type === TrackMatteType.LUMA_INVERTED) return '루마 반전 매트';
     return '트랙 매트';
-  }
-
-  // X 가 L 을 트랙 매트로 쓰고 있으면 매트 종류, 아니면 null
-  function matteTypeUsing(X, L) {
-    var tml;
-    try {
-      tml = X.trackMatteLayer; // AE 2023(23.0) 이상: 매트 레이어를 직접 알려 줌
-      if (tml !== undefined) return (tml && tml.index === L.index) ? X.trackMatteType : null;
-      // 이전 버전: 바로 위 레이어가 매트
-      if (X.index === L.index + 1 && X.trackMatteType !== TrackMatteType.NO_TRACK_MATTE) return X.trackMatteType;
-    } catch (e) {}
-    return null;
   }
 
   function hasActiveEffects(ly) {
@@ -365,6 +357,7 @@
   }
 
   function findCompByName(ctx, name) {
+    if (name === ctx.C.name) return ctx.C; // 이름이 같은 컴포지션이 여럿이면 지금 검사하는 쪽으로 (안전한 쪽)
     return ctx.comps.hasOwnProperty('c_' + name) ? ctx.comps['c_' + name] : null;
   }
 
@@ -547,46 +540,91 @@
   }
 
   // ===========================================================================
-  //  프로젝트 전체 검사 (한 번 훑어서 참조 목록을 만들어 둠)
+  //  프로젝트 전체 검사
+  //  프로젝트를 한 번만 훑어서 익스프레션과 레이어 선택 항목을 모아 두고(scanProject),
+  //  컴포지션마다 그 목록에서 필요한 참조만 뽑아 씁니다(contextFor).
   // ===========================================================================
-  function buildContext(C) {
-    var ctx = { C: C, comps: {}, names: {}, exprs: [], layerRefs: [], egp: [] };
-    var comps = [], i, j, it;
+  function scanProject(targets) {
+    var raw = { comps: {}, exprs: [], layerProps: [] }, want = {}, comps = [], i, j, it;
+    for (i = 0; i < targets.length; i++) want['k' + targets[i].id] = true;
     for (i = 1; i <= app.project.numItems; i++) {
       it = app.project.item(i);
       if (!(it instanceof CompItem)) continue;
       comps.push(it);
-      if (!ctx.comps.hasOwnProperty('c_' + it.name)) ctx.comps['c_' + it.name] = it;
+      if (!raw.comps.hasOwnProperty('c_' + it.name)) raw.comps['c_' + it.name] = it;
     }
-    // 이름이 같은 컴포지션이 여럿이면 지금 컴포지션을 가리킨다고 봅니다 (안전한 쪽)
-    ctx.comps['c_' + C.name] = C;
     for (i = 0; i < comps.length; i++) {
-      for (j = 1; j <= comps[i].numLayers; j++) scanLayer(comps[i].layer(j), comps[i], ctx);
+      for (j = 1; j <= comps[i].numLayers; j++) scanLayer(comps[i].layer(j), comps[i], raw, want['k' + comps[i].id] === true);
     }
-    collectEssentialProperties(ctx);
-    return ctx;
+    return raw;
   }
 
-  function scanLayer(X, E, ctx) {
-    var inC = E.id === ctx.C.id, key = layerKey(X);
+  function scanLayer(X, E, raw, wantLayerProps) {
     walkProps(X, [], null, function (p, names, effName) {
-      var vt = null, v = 0, ex = '', on = true, refs;
-      if (inC) {
+      var vt = null, ex = '', on = true;
+      if (wantLayerProps) {
         try { vt = p.propertyValueType; } catch (e) { vt = null; }
         if (vt === PropertyValueType.LAYER_INDEX) {
-          try { v = p.value; } catch (e) { v = 0; }
-          if (v > 0) {
-            ctx.layerRefs.push({ user: X, key: key, idx: v, effName: effName, propName: p.name, path: joinPath(names, p.name) });
-          }
+          raw.layerProps.push({ user: X, comp: E, prop: p, effName: effName, propName: p.name, path: joinPath(names, p.name), dead: false });
         }
       }
       try { ex = p.expression; } catch (e) { ex = ''; }
       if (!ex || (ex.indexOf('layer') === -1 && ex.indexOf('index') === -1 && ex.indexOf('numLayers') === -1)) return;
-      refs = parseExpressionRefs(ex, X, E, ctx);
-      if (!refs.length) return;
       try { on = p.expressionEnabled; } catch (e) { on = true; }
-      ctx.exprs.push({ user: X, key: key, comp: E, inC: inC, prop: p, path: joinPath(names, p.name), off: !on, refs: refs });
+      raw.exprs.push({ user: X, comp: E, prop: p, text: ex, path: joinPath(names, p.name), off: !on, dead: false });
     });
+  }
+
+  function pushDep(map, idx, item) {
+    if (!map['t' + idx]) map['t' + idx] = [];
+    map['t' + idx].push(item);
+  }
+
+  // 컴포지션 C 를 검사할 때 쓰는 참조 목록 (지금 레이어 번호 기준)
+  function contextFor(C, raw) {
+    var ctx = { C: C, comps: raw.comps, names: {}, exprs: [], layerRefs: [], egp: [], parents: {}, mattes: {}, lightSources: {} };
+    var n = C.numLayers, i, r, refs, v, X, tml;
+    for (i = 0; i < raw.exprs.length; i++) {
+      r = raw.exprs[i];
+      if (r.dead) continue;
+      // 다른 컴포지션의 익스프레션은 이 컴포지션 이름이나 .source 가 들어 있을 때만 관련이 있습니다.
+      if (r.comp.id !== C.id && r.text.indexOf(C.name) === -1 && r.text.indexOf('source') === -1) continue;
+      refs = parseExpressionRefs(r.text, r.user, r.comp, ctx);
+      if (refs.length) {
+        ctx.exprs.push({ user: r.user, key: layerKey(r.user), comp: r.comp, inC: r.comp.id === C.id, prop: r.prop, path: r.path, off: r.off, refs: refs });
+      }
+    }
+    for (i = 0; i < raw.layerProps.length; i++) {
+      r = raw.layerProps[i];
+      if (r.dead || r.comp.id !== C.id) continue;
+      try { v = r.prop.value; } catch (e) { v = 0; }
+      if (v > 0) ctx.layerRefs.push({ user: r.user, key: layerKey(r.user), idx: v, effName: r.effName, propName: r.propName, path: r.path });
+    }
+    // 부모 · 트랙 매트 · 환경 라이트 소스: 누가 어느 번호의 레이어를 쓰는지
+    for (i = 1; i <= n; i++) {
+      X = C.layer(i);
+      try {
+        if (X.parent) pushDep(ctx.parents, X.parent.index, X);
+      } catch (e) {}
+      if (X instanceof AVLayer) {
+        try {
+          tml = X.trackMatteLayer; // AE 2023(23.0) 이상: 매트 레이어를 직접 알려 줌
+          if (tml !== undefined) {
+            if (tml) pushDep(ctx.mattes, tml.index, { user: X, type: X.trackMatteType });
+          } else if (i > 1 && X.trackMatteType !== TrackMatteType.NO_TRACK_MATTE) {
+            pushDep(ctx.mattes, i - 1, { user: X, type: X.trackMatteType }); // 이전 버전: 바로 위 레이어가 매트
+          }
+        } catch (e) {}
+      }
+      if (X instanceof LightLayer) {
+        try {
+          v = X.lightSource; // AE 2024 이상 환경 라이트
+          if (v && v.containingComp && v.containingComp.id === C.id) pushDep(ctx.lightSources, v.index, X);
+        } catch (e) {}
+      }
+    }
+    collectEssentialProperties(ctx);
+    return ctx;
   }
 
   // 에센셜 그래픽스 패널에 올린 프로퍼티(마스터 프로퍼티)의 원래 레이어를 찾습니다. (AE 2022 이상)
@@ -703,9 +741,52 @@
     return segs;
   }
 
-  function analyzeLayer(L, ctx, selected) {
+  // 2D 레이어에서도 컴포지션 카메라 · 라이트를 읽는 이펙트 (Particular, Element 3D, 카드 댄스, 셰터 등)
+  // 어도비 기본 이펙트(ADBE …, CC …)는 대부분 읽지 않으므로, 그 밖의 이펙트와 카드 · 셰터 · 커스틱만 의심합니다.
+  function cameraAwareEffect(ly) {
+    var fx, i, ef, mn;
+    try {
+      fx = ly.property('ADBE Effect Parade');
+      for (i = 1; fx && i <= fx.numProperties; i++) {
+        ef = fx.property(i);
+        if (!ef.enabled) continue;
+        mn = String(ef.matchName);
+        if ((mn.indexOf('ADBE ') !== 0 && mn.indexOf('CC ') !== 0) || /Card|Shatter|Caustics/.test(mn)) return ef.name;
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  // 3D 레이어가 없을 때, 카메라 · 라이트를 읽을 수 있는 이펙트를 쓰는 레이어
+  function pluginUsers(C, L, ranges, dur) {
+    var out = { list: [], fx: '' }, i, X, name;
+    for (i = 1; i <= C.numLayers; i++) {
+      if (i === L.index) continue;
+      X = C.layer(i);
+      if (!isRendered(X) || !overlapsAny(timeRange(X, dur), ranges)) continue;
+      name = cameraAwareEffect(X);
+      if (name) {
+        out.list.push(X);
+        if (!out.fx) out.fx = name;
+      }
+    }
+    return out;
+  }
+
+  // 지우는 대상으로 골랐어도 반드시 남는 레이어
+  function surelyStays(X, selected) {
+    try {
+      return !selected[layerKey(X)] || X.locked || (isRendered(X) && !X.adjustmentLayer) ||
+        ((X instanceof AVLayer) && X.hasAudio && X.audioEnabled);
+    } catch (e) {
+      return true;
+    }
+  }
+
+  // quick: 여러 레이어를 한꺼번에 정리할 때, 보이거나 소리 나는 레이어는 다른 이유를 따지지 않음
+  function analyzeLayer(L, ctx, selected, quick) {
     var C = ctx.C, li = L.index, key = layerKey(L), n = C.numLayers, dur = C.duration;
-    var issues = [], seen = {}, i, j, X, t, v, lr, rec, head, hit, own, on = false, list, segs, other, hidden;
+    var issues = [], seen = {}, live = false, i, j, X, lr, rec, head, hit, own, on = false, list, segs, plug, other, hidden;
 
     function add(issue) {
       var sig = issue.tag + '|' + (issue.text || issue.tail || issue.fmt) + '|' + (issue.keys ? issue.keys.join(',') : '');
@@ -720,32 +801,26 @@
     // 2. 화면에 보이거나 소리가 나는 레이어
     if (L instanceof AVLayer) {
       if (isRendered(L) && !L.adjustmentLayer) {
+        live = true;
         add(hardIssue('화면 표시', 'Visible', '눈(비디오 스위치)이 켜져 있어 화면에 보이는 ' + kindLabel(L) + ' 레이어입니다.' +
           (L.guideLayer ? ' (가이드 레이어)' : '')));
       }
-      if (L.hasAudio && L.audioEnabled) add(hardIssue('오디오', 'Audio', '오디오 스위치가 켜져 있어 소리가 나는 레이어입니다.'));
+      if (L.hasAudio && L.audioEnabled) {
+        live = true;
+        add(hardIssue('오디오', 'Audio', '오디오 스위치가 켜져 있어 소리가 나는 레이어입니다.'));
+      }
     }
+    if (quick && live) return issues;
 
     // 3. 부모 / 트랙 매트 / 환경 라이트 소스
-    for (i = 1; i <= n; i++) {
-      if (i === li) continue;
-      X = C.layer(i);
-      try {
-        if (X.parent && X.parent.index === li) add(userIssue('부모', 'Parent', X, '', ' 레이어의 부모입니다.'));
-      } catch (e) {}
-      if (X instanceof AVLayer) {
-        t = matteTypeUsing(X, L);
-        if (t !== null) add(userIssue('트랙 매트', 'Matte', X, '', ' 레이어의 트랙 매트입니다. (' + matteLabel(t) + ')'));
-      }
-      if (X instanceof LightLayer) {
-        try {
-          v = X.lightSource; // AE 2024 이상 환경 라이트
-          if (v && v.containingComp && v.containingComp.id === C.id && v.index === li) {
-            add(userIssue('라이트 소스', 'Light Source', X, '', ' 라이트의 소스 레이어로 쓰이고 있습니다.'));
-          }
-        } catch (e) {}
-      }
+    list = ctx.parents['t' + li] || [];
+    for (i = 0; i < list.length; i++) add(userIssue('부모', 'Parent', list[i], '', ' 레이어의 부모입니다.'));
+    list = ctx.mattes['t' + li] || [];
+    for (i = 0; i < list.length; i++) {
+      add(userIssue('트랙 매트', 'Matte', list[i].user, '', ' 레이어의 트랙 매트입니다. (' + matteLabel(list[i].type) + ')'));
     }
+    list = ctx.lightSources['t' + li] || [];
+    for (i = 0; i < list.length; i++) add(userIssue('라이트 소스', 'Light Source', list[i], '', ' 라이트의 소스 레이어로 쓰이고 있습니다.'));
 
     // 4. 이펙트 등에서 레이어를 고르는 항목 (매트 설정, 변위 맵, 레이어 컨트롤 …)
     for (i = 0; i < ctx.layerRefs.length; i++) {
@@ -800,18 +875,34 @@
           X = C.layer(i);
           if (isRendered(X) && X.threeDLayer && acceptsLights(X) && overlaps(timeRange(X, dur), own)) list.push(X);
         }
-        if (list.length) add(groupIssue('라이트', 'Light', list, '라이트로서 3D 레이어 {n}개({list})를 비추고 있습니다.'));
+        if (list.length) {
+          add(groupIssue('라이트', 'Light', list, '라이트로서 3D 레이어 {n}개({list})를 비추고 있습니다.'));
+        } else {
+          plug = pluginUsers(C, L, [own], dur);
+          if (plug.list.length) {
+            add(groupIssue('라이트', 'Light', plug.list, '3D 레이어는 없지만, 컴포지션 라이트를 쓸 수 있는 이펙트("' + plug.fx +
+              '" 등)가 있는 레이어 {n}개({list})가 있습니다.'));
+          }
+        }
       } else if (L instanceof CameraLayer) {
         segs = activeCameraSegments(C, L, own, dur);
         for (i = 1; segs.length && i <= n; i++) {
           X = C.layer(i);
           if (isRendered(X) && X.threeDLayer && overlapsAny(timeRange(X, dur), segs)) list.push(X);
         }
-        if (list.length) add(groupIssue('카메라', 'Camera', list, '컴포지션 카메라로서 3D 레이어 {n}개({list})의 시점을 정하고 있습니다.'));
+        if (list.length) {
+          add(groupIssue('카메라', 'Camera', list, '컴포지션 카메라로서 3D 레이어 {n}개({list})의 시점을 정하고 있습니다.'));
+        } else if (segs.length) {
+          plug = pluginUsers(C, L, segs, dur);
+          if (plug.list.length) {
+            add(groupIssue('카메라', 'Camera', plug.list, '3D 레이어는 없지만, 컴포지션 카메라를 쓸 수 있는 이펙트("' + plug.fx +
+              '" 등)가 있는 레이어 {n}개({list})가 있습니다.'));
+          }
+        }
       }
     }
 
-    // 8. 솔로: 선택하지 않은 다른 솔로 레이어가 없으면, 지울 때 숨어 있던 레이어가 다시 보입니다.
+    // 8. 솔로: 남는 솔로 레이어가 없으면, 지울 때 숨어 있던 레이어가 다시 보입니다.
     if (isSolo(L)) {
       other = false;
       hidden = 0;
@@ -819,11 +910,11 @@
         if (i === li) continue;
         X = C.layer(i);
         if (isSolo(X)) {
-          if (!selected[layerKey(X)]) {
+          if (surelyStays(X, selected)) {
             other = true;
             break;
           }
-        } else if (isRendered(X) && !selected[layerKey(X)]) {
+        } else if (isRendered(X) && surelyStays(X, selected)) {
           hidden++;
         }
       }
@@ -888,13 +979,39 @@
   // ===========================================================================
   //  실행
   // ===========================================================================
-  function safeDelete(C, layers, tagMode) {
-    var selected = {}, entries = [], del = {}, doomed = [], kept = [], res, ctx, changed, e, i, j, is, tagSeen;
+  function allLayers(comp) {
+    var out = [], i;
+    for (i = 1; i <= comp.numLayers; i++) out.push(comp.layer(i));
+    return out;
+  }
+
+  // 컴포지션과, 그 안에 프리컴프로 들어 있는 컴포지션을 끝까지 (위에서 아래 순서로)
+  function collectCompTree(root) {
+    var list = [root], seen = {}, i, j, ly, src;
+    seen['k' + root.id] = true;
+    for (i = 0; i < list.length; i++) {
+      for (j = 1; j <= list[i].numLayers; j++) {
+        ly = list[i].layer(j);
+        if (!(ly instanceof AVLayer)) continue;
+        try { src = ly.source; } catch (e) { src = null; }
+        if (src instanceof CompItem && !seen['k' + src.id]) {
+          seen['k' + src.id] = true;
+          list.push(src);
+        }
+      }
+    }
+    return list;
+  }
+
+  // 컴포지션 하나에서 layers 를 검사하고, 지워도 되는 것만 지웁니다.
+  function processComp(C, layers, raw, quick) {
+    var selected = {}, entries = [], del = {}, doomed = [], byIdx = {}, lists = [raw.exprs, raw.layerProps];
+    var res, ctx, changed, e, i, j, r, is, tagSeen;
     for (i = 0; i < layers.length; i++) selected[layerKey(layers[i])] = true;
-    ctx = buildContext(C);
+    ctx = contextFor(C, raw);
     for (i = 0; i < layers.length; i++) {
       e = { layer: layers[i], key: layerKey(layers[i]), name: layers[i].name, index: layers[i].index };
-      e.issues = analyzeLayer(layers[i], ctx, selected);
+      e.issues = analyzeLayer(layers[i], ctx, selected, quick);
       entries.push(e);
       del[e.key] = true;
     }
@@ -916,14 +1033,25 @@
       }
     } while (changed);
 
-    res = { total: entries.length, deleted: [], kept: [], waived: false, tagMode: tagMode, tagFailed: [] };
+    res = { comp: C, compName: C.name, deleted: [], kept: [], waived: false, ctx: ctx, del: del };
     for (i = 0; i < entries.length; i++) {
-      if (del[entries[i].key] === true) doomed.push(entries[i]);
+      if (del[entries[i].key] !== true) continue;
+      entries[i].raws = [];
+      byIdx['i' + entries[i].index] = entries[i];
+      doomed.push(entries[i]);
+    }
+    // 지울 레이어의 익스프레션 · 레이어 선택 항목은 목록에서 뺍니다 (지운 뒤에는 읽을 수 없음)
+    for (i = 0; i < lists.length; i++) {
+      for (j = 0; j < lists[i].length; j++) {
+        r = lists[i][j];
+        if (!r.dead && r.comp.id === C.id && byIdx['i' + r.user.index]) byIdx['i' + r.user.index].raws.push(r);
+      }
     }
     doomed.sort(function (a, b) { return b.index - a.index; }); // 아래 레이어부터
     for (i = 0; i < doomed.length; i++) {
       try {
         doomed[i].layer.remove();
+        for (j = 0; j < doomed[i].raws.length; j++) doomed[i].raws[j].dead = true;
       } catch (err) {
         doomed[i].error = String(err);
         del[doomed[i].key] = false;
@@ -939,11 +1067,13 @@
       }
       e.reasons = [];
       e.tags = [];
+      e.live = false;
       tagSeen = {};
       if (e.error) e.reasons.push('[오류] 삭제하지 못했습니다: ' + e.error);
       for (j = 0; j < e.issues.length; j++) {
         is = e.issues[j];
         if (isWaived(is, del)) continue;
+        if (is.tag === 'Visible' || is.tag === 'Audio') e.live = true;
         e.reasons.push('[' + is.cat + '] ' + issueText(is, del));
         if (!tagSeen[is.tag]) {
           tagSeen[is.tag] = true;
@@ -951,14 +1081,47 @@
         }
       }
       e.label = label(e.layer);
-      kept.push(e);
-    }
-
-    for (i = 0; i < kept.length; i++) {
-      if (tagMode && !applyTags(kept[i], ctx, del)) res.tagFailed.push(kept[i].label);
-      res.kept.push({ label: kept[i].label, reasons: kept[i].reasons });
+      res.kept.push(e);
     }
     return res;
+  }
+
+  // mode: 'selection' 선택한 레이어 / 'comp' 지금 컴포지션 전체 / 'deep' 프리컴프 속까지
+  function safeDelete(C, mode, layers, tagMode) {
+    var comps = mode === 'deep' ? collectCompTree(C) : [C];
+    var raw = scanProject(comps), results = {}, out, pass = 0, again, i, j, k, r, prev, kept;
+    do {
+      again = false;
+      for (i = 0; i < comps.length; i++) {
+        r = processComp(comps[i], mode === 'selection' ? layers : allLayers(comps[i]), raw, mode !== 'selection');
+        if (r.deleted.length) again = true;
+        k = 'k' + comps[i].id;
+        prev = results[k];
+        if (prev) {
+          r.deleted = prev.deleted.concat(r.deleted);
+          r.waived = r.waived || prev.waived;
+        }
+        results[k] = r;
+      }
+      pass++;
+      // 한 컴포지션에서 지운 레이어 때문에 다른 컴포지션의 레이어가 풀려날 수 있으므로 다시 한 번
+    } while (mode === 'deep' && again && pass < 20);
+
+    out = { mode: mode, root: C.name, comps: [], tagMode: tagMode, tagged: 0, tagFailed: [] };
+    for (i = 0; i < comps.length; i++) out.comps.push(results['k' + comps[i].id]);
+    if (tagMode) {
+      for (i = 0; i < out.comps.length; i++) {
+        kept = out.comps[i].kept;
+        for (j = 0; j < kept.length; j++) {
+          // 한꺼번에 정리할 때는 보이거나 소리 나는 레이어 이름은 그대로 둡니다.
+          if (mode !== 'selection' && kept[j].live) continue;
+          if (!kept[j].tags.length) continue;
+          if (applyTags(kept[j], out.comps[i].ctx, out.comps[i].del)) out.tagged++;
+          else out.tagFailed.push(kept[j].label);
+        }
+      }
+    }
+    return out;
   }
 
   function showReport(headLines, bodyLines) {
@@ -980,64 +1143,114 @@
     w.show();
   }
 
-  function showResult(res) {
-    var head = [], body = [], i, j, k;
-    if (res.total === 1 && res.deleted.length === 1) return; // 한 개를 지웠으면 조용히 끝
-    if (res.total === 1) {
-      k = res.kept[0];
+  function tagNotes(res, head, body) {
+    if (!res.tagMode) return;
+    if (res.tagged) head.push('지우지 않은 레이어 이름 끝에 이유 태그를 붙였습니다.');
+    if (res.tagFailed.length) {
+      body.push('');
+      body.push('※ 이름을 바꾸면 익스프레션 연결이 끊어질 수 있어 태그를 붙이지 않은 레이어: ' + res.tagFailed.join(', '));
+    }
+  }
+
+  function showSelectionResult(res) {
+    var r = res.comps[0], total = r.deleted.length + r.kept.length, head = [], body = [], i, j, k;
+    if (total === 1 && r.deleted.length === 1) return; // 한 개를 지웠으면 조용히 끝
+    if (total === 1) {
+      k = r.kept[0];
       head.push('레이어를 삭제하지 않았습니다.');
       body.push(k.label + ' — 지우면 아래와 같은 영향이 있습니다.');
       body.push('');
       for (j = 0; j < k.reasons.length; j++) body.push('• ' + k.reasons[j]);
     } else {
-      head.push('선택한 레이어 ' + res.total + '개 중 ' + res.deleted.length + '개를 삭제했고, ' + res.kept.length + '개는 삭제하지 않았습니다.');
-      body.push('■ 삭제함 (' + res.deleted.length + ')');
-      for (i = 0; i < res.deleted.length; i++) body.push('    - ' + res.deleted[i]);
-      if (!res.deleted.length) body.push('    (없음)');
+      head.push('선택한 레이어 ' + total + '개 중 ' + r.deleted.length + '개를 삭제했고, ' + r.kept.length + '개는 삭제하지 않았습니다.');
+      body.push('■ 삭제함 (' + r.deleted.length + ')');
+      for (i = 0; i < r.deleted.length; i++) body.push('    - ' + r.deleted[i]);
+      if (!r.deleted.length) body.push('    (없음)');
       body.push('');
-      body.push('■ 삭제하지 않음 (' + res.kept.length + ')');
-      for (i = 0; i < res.kept.length; i++) {
-        body.push('    - ' + res.kept[i].label);
-        for (j = 0; j < res.kept[i].reasons.length; j++) body.push('        • ' + res.kept[i].reasons[j]);
+      body.push('■ 삭제하지 않음 (' + r.kept.length + ')');
+      for (i = 0; i < r.kept.length; i++) {
+        body.push('    - ' + r.kept[i].label);
+        for (j = 0; j < r.kept[i].reasons.length; j++) body.push('        • ' + r.kept[i].reasons[j]);
       }
-      if (!res.kept.length) body.push('    (없음)');
-      if (res.waived) {
+      if (!r.kept.length) body.push('    (없음)');
+      if (r.waived) {
         body.push('');
         body.push('※ 함께 선택해서 같이 지운 레이어끼리의 연결(부모, 트랙 매트, 익스프레션 등)은 문제로 보지 않았습니다.');
       }
     }
-    if (res.tagMode && res.kept.length) {
-      head.push('지우지 않은 레이어 이름 끝에 이유 태그를 붙였습니다.');
-      if (res.tagFailed.length) {
-        body.push('');
-        body.push('※ 이름을 바꾸면 익스프레션 연결이 끊어질 수 있어 태그를 붙이지 않은 레이어: ' + res.tagFailed.join(', '));
-      }
-    }
+    tagNotes(res, head, body);
     showReport(head, body);
   }
 
-  function run(tagMode) {
-    var C = app.project.activeItem, sel, layers = [], i, res = null;
+  // 컴포지션 전체 / 프리컴프 속까지 정리한 결과: 컴포지션마다 묶어서 보여 줍니다.
+  function showCompResult(res) {
+    var head = [], body = [], del = 0, kept = 0, waived = false, i, j, m, r, live;
+    for (i = 0; i < res.comps.length; i++) {
+      del += res.comps[i].deleted.length;
+      kept += res.comps[i].kept.length;
+      if (res.comps[i].waived) waived = true;
+    }
+    head.push(res.mode === 'deep' ?
+      '"' + res.root + '" 컴포지션과 그 안의 프리컴프 ' + (res.comps.length - 1) + '개까지 모든 레이어를 검사했습니다.' :
+      '"' + res.root + '" 컴포지션의 모든 레이어를 검사했습니다.');
+    head.push('레이어 ' + (del + kept) + '개 중 ' + del + '개를 삭제했고, ' + kept + '개는 삭제하지 않았습니다.');
+    for (i = 0; i < res.comps.length; i++) {
+      r = res.comps[i];
+      live = 0;
+      for (j = 0; j < r.kept.length; j++) if (r.kept[j].live) live++;
+      if (i) body.push('');
+      body.push('[컴포지션] "' + r.compName + '" — 삭제 ' + r.deleted.length + '개 · 남김 ' + r.kept.length + '개');
+      if (r.deleted.length) {
+        body.push('    ■ 삭제함 (' + r.deleted.length + ')');
+        for (j = 0; j < r.deleted.length; j++) body.push('        - ' + r.deleted[j]);
+      }
+      if (r.kept.length) {
+        body.push('    ■ 삭제하지 않음 (' + r.kept.length + ')');
+        if (live) body.push('        - 화면에 보이거나 소리가 나는 레이어 ' + live + '개');
+        for (j = 0; j < r.kept.length; j++) {
+          if (r.kept[j].live) continue;
+          body.push('        - ' + r.kept[j].label);
+          for (m = 0; m < r.kept[j].reasons.length; m++) body.push('            • ' + r.kept[j].reasons[m]);
+        }
+      }
+    }
+    if (waived) {
+      body.push('');
+      body.push('※ 같이 지운 레이어끼리의 연결(부모, 트랙 매트, 익스프레션 등)은 문제로 보지 않았습니다.');
+    }
+    tagNotes(res, head, body);
+    showReport(head, body);
+  }
+
+  function run(mods) {
+    var C = app.project.activeItem, sel, layers = [], mode, i, res = null;
     if (!(C instanceof CompItem)) {
-      alert('컴포지션 타임라인을 열고 지울 레이어를 선택한 뒤 눌러 주세요.', TITLE);
+      alert('컴포지션 타임라인을 열고 눌러 주세요.', TITLE);
       return;
     }
     sel = C.selectedLayers;
-    if (!sel || !sel.length) {
-      alert('지울 레이어를 먼저 선택해 주세요.', TITLE);
-      return;
+    if (sel && sel.length) {
+      mode = 'selection';
+      for (i = 0; i < sel.length; i++) layers.push(sel[i]);
+      layers.sort(function (a, b) { return a.index - b.index; });
+    } else {
+      mode = mods.deep ? 'deep' : 'comp';
+      if (!C.numLayers) {
+        alert('"' + C.name + '" 컴포지션에 레이어가 없습니다.', TITLE);
+        return;
+      }
     }
-    for (i = 0; i < sel.length; i++) layers.push(sel[i]);
-    layers.sort(function (a, b) { return a.index - b.index; });
     app.beginUndoGroup(SCRIPT_NAME);
     try {
-      res = safeDelete(C, layers, tagMode);
+      res = safeDelete(C, mode, layers, mods.tag);
     } catch (err) {
       alert('스크립트 실행 중 오류가 발생했습니다.\n' + err + (err.line ? ' (line ' + err.line + ')' : ''), TITLE);
     } finally {
       app.endUndoGroup();
     }
-    if (res) showResult(res);
+    if (!res) return;
+    if (mode === 'selection') showSelectionResult(res);
+    else showCompResult(res);
   }
 
   function buildUI(host) {
@@ -1049,10 +1262,12 @@
     win.spacing = 6;
     btn = win.add('button', undefined, 'Safe Delete');
     btn.helpTip = '선택한 레이어가 다른 곳에 쓰이는지 검사한 뒤, 지워도 영향이 없는 레이어만 삭제합니다.\n' +
-      'Ctrl(Mac: Cmd)을 누른 채 클릭하면 지우지 않은 레이어 이름에 이유 태그를 붙입니다.';
+      '아무것도 선택하지 않으면 지금 컴포지션의 모든 레이어를 정리합니다.\n' +
+      'Shift + 클릭 (선택 없음): 안에 든 프리컴프까지 끝까지 정리\n' +
+      'Ctrl(Mac: Cmd) + 클릭: 지우지 않은 레이어 이름에 이유 태그 붙이기 (Shift 와 함께 써도 됨)';
     btn.onClick = function () {
       var ks = ScriptUI.environment.keyboardState;
-      run(!!(ks && (ks.ctrlKey || ks.metaKey)));
+      run({ tag: !!(ks && (ks.ctrlKey || ks.metaKey)), deep: !!(ks && ks.shiftKey) });
     };
     win.onResizing = win.onResize = function () { this.layout.resize(); };
     if (win instanceof Window) {

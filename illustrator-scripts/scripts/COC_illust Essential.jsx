@@ -17,6 +17,7 @@
  *  [회전]
  *    회전                : 0°로 초기화 / 맨 위 객체 각도로 / 입력한 각도로
  *    포인트 기준 회전     : 선택한 두 점이 수직 또는 수평이 되도록 객체를 돌림
+ *    포인트 기준 각도 스포이드 : 두 점을 잇는 선의 각도를 읽어 와서 다른 객체에 그 각도를 적용
  *  [텍스트]
  *    단락 정렬 (위치 유지) : 정렬을 바꿔도 포인트 텍스트가 제자리에
  *    기준선 정렬          : 크기가 다른 글자들을 글꼴 기준선에 맞춤
@@ -91,6 +92,7 @@
     reference: 0,
     keepRatio: true,
     angle: '0',
+    pointAngle: '0',
     baseline: 0,
     baselineOthers: false,
     wordSpacing: '0',
@@ -128,6 +130,7 @@
   function buildPanel(s) {
     var lastUnit = unitIndexOf(s.unit);
     var picked = null; // 스포이드로 읽은 정확한 값 { text, unit, points } (칸에는 반올림해서 보여 줌)
+    var pickedAngle = null; // 각도 스포이드로 읽은 정확한 값 { text, value }
 
     var win = new Window('palette', SCRIPT_TITLE, undefined, { closeButton: true });
     win.orientation = 'column';
@@ -223,6 +226,15 @@
     var btnPointHorizontal = pPoints.add('button', undefined, '포인트 기준 수평 회전');
     btnPointVertical.helpTip = '두 점이 위아래로 똑바로 서도록 점이 속한 객체를 돌립니다. (두 점의 가운데가 중심)';
     btnPointHorizontal.helpTip = '두 점이 옆으로 나란히 놓이도록 점이 속한 객체를 돌립니다. (두 점의 가운데가 중심)';
+    var btnPickAngle = pPoints.add('button', undefined, '포인트 기준 각도 스포이드');
+    btnPickAngle.helpTip = '두 점을 잇는 선의 기울기(-90° ~ 90°, 반시계 방향 +)를 읽어 아래 칸에 넣습니다.';
+    var gPointAngle = addRow(pPoints);
+    addLabel(gPointAngle, '읽은 각도:', 66);
+    var etPointAngle = gPointAngle.add('edittext', undefined, s.pointAngle);
+    etPointAngle.characters = 6;
+    gPointAngle.add('statictext', undefined, '°');
+    var btnPointApply = gPointAngle.add('button', undefined, '적용');
+    btnPointApply.helpTip = '선택한 객체를 이 각도로 맞춥니다. (위의 각도 적용과 같은 방식)';
 
     // ---- [텍스트] ----------------------------------------------------------
     var pJustify = addPanel(tabText, '단락 정렬 (위치 유지)');
@@ -337,6 +349,14 @@
     btnMatchRotation.onClick = function () { send({ action: 'rotate', mode: 'match', angle: 0 }); };
     btnPointVertical.onClick = function () { send({ action: 'pointrotate', axis: 'v' }); };
     btnPointHorizontal.onClick = function () { send({ action: 'pointrotate', axis: 'h' }); };
+    btnPickAngle.onClick = function () { send({ action: 'pickangle' }); };
+    btnPointApply.onClick = function () {
+      // 칸을 고치지 않았으면 스포이드로 읽은 정확한 값을 씁니다.
+      var angle = pickedAngle && pickedAngle.text === etPointAngle.text ? pickedAngle.value : parseNumber(etPointAngle.text);
+      if (isNaN(angle)) return setStatus('각도는 숫자로 입력해 주세요.');
+      remember();
+      send({ action: 'rotate', mode: 'set', angle: angle });
+    };
     btnArrange.onClick = arrangeArtboards;
     btnRename.onClick = function () {
       remember();
@@ -398,6 +418,7 @@
     for (i = 0; i < rememberedClicks.length; i++) rememberedClicks[i].onClick = remember;
     etGap.onChange = remember;
     etAngle.onChange = remember;
+    etPointAngle.onChange = remember;
     etWord.onChange = remember;
     etColumns.onChange = remember;
     etBoardGap.onChange = remember;
@@ -550,6 +571,13 @@
         if (parseInt(p[5], 10)) rotateText += '\n' + p[5] + '개 실패 (잠긴 객체?)';
         return setStatus(rotateText);
       }
+      if (p[1] === 'pickangle') {
+        var angle = parseFloat(p[2]);
+        etPointAngle.text = formatNumber(angle);
+        pickedAngle = { text: etPointAngle.text, value: angle };
+        remember();
+        return setStatus('두 점의 각도를 가져왔습니다: ' + etPointAngle.text + '°\n각도를 줄 객체를 선택하고 [적용]을 누르세요.');
+      }
       if (p[1] === 'prot') {
         var pointAxis = p[2] === 'v' ? '수직' : '수평';
         if (!parseFloat(p[3])) return setStatus('두 점이 이미 ' + pointAxis + '입니다.');
@@ -675,6 +703,7 @@
         reference: ddReference.selection ? ddReference.selection.index : 0,
         keepRatio: cbRatio.value,
         angle: etAngle.text,
+        pointAngle: etPointAngle.text,
         baseline: ddBaseline.selection ? ddBaseline.selection.index : 0,
         baselineOthers: cbOthers.value,
         wordSpacing: etWord.text,
@@ -726,6 +755,7 @@
         case 'matchsize': return matchSize(sel, req);
         case 'rotate': return rotateItems(sel, req);
         case 'pointrotate': return pointRotate(sel, req);
+        case 'pickangle': return pickAngle(sel);
         case 'justify': return justify(sel, req);
         case 'baseline': return baseline(sel, req);
         case 'wordspace': return wordSpace(sel, req);
@@ -1155,14 +1185,13 @@
     function pointRotate(sel, o) {
       var list = objects(sel);
       if (list === null) return 'err|textedit';
-      var points = [];
-      for (var i = 0; i < list.length && points.length <= 2; i++) collectPoints(list[i], points);
-      if (points.length !== 2) return 'err|points|' + (points.length > 2 ? 'many' : points.length);
-      var a = anchorOf(points[0]);
-      var b = anchorOf(points[1]);
+      var pair = twoPoints(list);
+      if (typeof pair === 'string') return pair;
+      var points = pair.points;
+      var a = pair.a;
+      var b = pair.b;
       var dx = b[0] - a[0];
       var dy = b[1] - a[1];
-      if (Math.sqrt(dx * dx + dy * dy) < 1e-6) return 'err|samepoint';
       var delta = (o.axis === 'v' ? 90 : 0) - Math.atan2(dy, dx) * 180 / Math.PI;
       delta = delta - 180 * Math.round(delta / 180); // the smallest turn: -90 .. 90
       if (Math.abs(delta) < 1e-6) return 'ok|prot|' + o.axis + '|0|0|0';
@@ -1188,6 +1217,31 @@
         }
       }
       return 'ok|prot|' + o.axis + '|' + delta + '|' + done + '|' + failed;
+    }
+
+    // The tilt of the line through two selected anchor points: -90 < angle <= 90, counter-clockwise positive.
+    function pickAngle(sel) {
+      var list = objects(sel);
+      if (list === null) return 'err|textedit';
+      var pair = twoPoints(list);
+      if (typeof pair === 'string') return pair;
+      var angle = Math.atan2(pair.b[1] - pair.a[1], pair.b[0] - pair.a[0]) * 180 / Math.PI;
+      if (angle > 90) angle -= 180;
+      else if (angle <= -90) angle += 180;
+      return 'ok|pickangle|' + angle;
+    }
+
+    // Exactly two selected anchor points at different places: { points, a, b }, or an 'err|...' result.
+    function twoPoints(list) {
+      var points = [];
+      for (var i = 0; i < list.length && points.length <= 2; i++) collectPoints(list[i], points);
+      if (points.length !== 2) return 'err|points|' + (points.length > 2 ? 'many' : points.length);
+      var a = anchorOf(points[0]);
+      var b = anchorOf(points[1]);
+      var dx = b[0] - a[0];
+      var dy = b[1] - a[1];
+      if (Math.sqrt(dx * dx + dy * dy) < 1e-6) return 'err|samepoint';
+      return { points: points, a: a, b: b };
     }
 
     // Selected anchor points (Direct Selection tool) as { path, index }; stops once there are more than two.

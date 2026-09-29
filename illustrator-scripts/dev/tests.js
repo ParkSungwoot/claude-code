@@ -1981,6 +1981,62 @@ test('essential: untrim releases only the trim clipping groups and restores the 
   assert.strictEqual(panelStatus(ui), '아트보드 밖으로 나간 객체 3개를 아트보드 크기로 잘랐습니다.', 'trim works again after untrim');
 });
 
+test('essential: point angle eyedropper reads the tilt of two points and applies it exactly', () => {
+  const root = fs.mkdtempSync(path.join(TMP, 'essential-angle-'));
+  let { env, ui, win } = openPanel({
+    root,
+    documents: [{
+      selection: [pts('P', [[0, 0], [100, 10], [100, 60]], { selectedPoints: [0, 1] })],
+      unselected: [rotRect('Q', 300, 0, 20, 10, 0), rotRect('R', 400, 0, 20, 10, 40, { tagAngle: 40 })],
+    }],
+  });
+  ui.selectTab('회전');
+  ui.click(ui.button('포인트 기준 각도 스포이드'));
+  const exact = Math.atan2(10, 100) * 180 / Math.PI;
+  assert.strictEqual(ui.after('읽은 각도:', 'edittext').text, '5.711');
+  assert.strictEqual(panelStatus(ui), '두 점의 각도를 가져왔습니다: 5.711°\n각도를 줄 객체를 선택하고 [적용]을 누르세요.');
+  assert.strictEqual(env.rotateCalls.length, 0, 'reading turns nothing');
+
+  env.ai.documents[0]._select(['Q', 'R']);
+  ui.click(ui.after('읽은 각도:', 'button'));
+  assert.ok(near(specOf(env, 'Q').angle, exact, 1e-9), 'Q gets the exact angle, not the rounded one');
+  assert.ok(near(specOf(env, 'R').angle, exact, 1e-9), 'R (was 40°) is set to the angle, not turned by it');
+  assert.ok(near(tagAngle(specOf(env, 'R')), exact, 1e-9), 'Transform panel angle follows');
+  assert.strictEqual(panelStatus(ui), '5.711°로 맞췄습니다: 2개');
+
+  // a typed value wins over the picked one
+  ui.type(ui.after('읽은 각도:', 'edittext'), '-30');
+  ui.click(ui.after('읽은 각도:', 'button'));
+  assert.ok(near(specOf(env, 'Q').angle, -30, 1e-9));
+  ui.type(ui.after('읽은 각도:', 'edittext'), 'abc');
+  ui.click(ui.after('읽은 각도:', 'button'));
+  assert.strictEqual(panelStatus(ui), '각도는 숫자로 입력해 주세요.');
+  ui.type(ui.after('읽은 각도:', 'edittext'), '12.5');
+  win.close();
+  ({ ui } = openPanel({ root, documents: [{}] }));
+  ui.selectTab('회전');
+  assert.strictEqual(ui.after('읽은 각도:', 'edittext').text, '12.5', 'remembered');
+});
+
+test('essential: point angle eyedropper gives the line tilt whatever the point order', () => {
+  const read = (points) => {
+    const { ui } = openPanel({ documents: [{ selection: [pts('P', points, { selectedPoints: [0, 1] })] }] });
+    ui.selectTab('회전');
+    ui.click(ui.button('포인트 기준 각도 스포이드'));
+    return ui.after('읽은 각도:', 'edittext').text;
+  };
+  assert.strictEqual(read([[0, 0], [10, -10]]), '-45', 'down to the right');
+  assert.strictEqual(read([[10, 10], [0, 0]]), '45', 'right to left is the same line');
+  assert.strictEqual(read([[0, 0], [0, 10]]), '90');
+  assert.strictEqual(read([[0, 10], [0, 0]]), '90', 'vertical is always 90');
+  assert.strictEqual(read([[5, 5], [-5, 5]]), '0', 'horizontal is 0 (not 180)');
+  const { ui } = openPanel({ documents: [{ selection: [pts('P', [[0, 0], [10, 0]], { selectedPoints: [1] })] }] });
+  ui.selectTab('회전');
+  ui.click(ui.button('포인트 기준 각도 스포이드'));
+  assert.strictEqual(panelStatus(ui), '점을 정확히 두 개 선택하세요. (지금 1개) 직접 선택 도구(A)를 쓰세요.');
+  assert.strictEqual(ui.after('읽은 각도:', 'edittext').text, '0', 'field unchanged');
+});
+
 // ===========================================================================
 let failed = 0;
 for (const t of tests) {

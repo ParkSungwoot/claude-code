@@ -347,7 +347,8 @@ class Driver {
   }
 
   find(type, text) {
-    const matches = this.all(type).filter((c) => matchText(c._state.text, text));
+    let matches = this.all(type).filter((c) => matchText(c._state.text, text));
+    if (matches.length > 1) matches = matches.filter((c) => this.onShownTab(c)); // same text on another tab
     if (matches.length !== 1) {
       throw new Error(`find(${type}, ${text}) matched ${matches.length}: ` +
         this.all(type).map((c) => JSON.stringify(c._state.text)).join(', '));

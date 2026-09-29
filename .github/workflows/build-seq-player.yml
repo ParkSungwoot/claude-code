@@ -1,0 +1,57 @@
+name: COC_SEQ Player (Windows build)
+
+on:
+  push:
+    paths:
+      - "seq-player/**"
+      - ".github/workflows/build-seq-player.yml"
+  pull_request:
+    paths:
+      - "seq-player/**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: seq-player
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: seq-player/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pytest
+
+      - name: Unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q tests
+
+      - name: Build COC_SEQ Player.exe
+        run: pyinstaller --noconfirm "COC_SEQ Player.spec"
+
+      - name: Self-test the built exe
+        run: |
+          $exe = (Resolve-Path "dist\COC_SEQ Player\COC_SEQ Player.exe").Path
+          $out = Join-Path (Resolve-Path dist).Path "self-test.txt"
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$out`"" -Wait -PassThru
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+
+      - name: Zip
+        run: Compress-Archive -Path "dist\COC_SEQ Player" -DestinationPath "dist\COC_SEQ_Player_win64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: COC_SEQ_Player_win64
+          path: seq-player/dist/COC_SEQ_Player_win64.zip
+          retention-days: 30

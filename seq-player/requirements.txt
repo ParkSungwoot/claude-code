@@ -1,0 +1,8 @@
+# Versions the app was built and tested with.
+PySide6==6.11.2
+numpy==2.4.6
+OpenImageIO==3.1.17.0
+opencolorio==2.5.2
+av==18.1.0
+PyOpenGL==3.1.10
+sounddevice==0.5.6

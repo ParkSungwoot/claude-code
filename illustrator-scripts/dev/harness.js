@@ -645,6 +645,8 @@ function makeIllustrator(env, fsys) {
     ElementPlacement: enumOf('ElementPlacement', { INSIDE: 0, PLACEAFTER: 1, PLACEATBEGINNING: 2, PLACEATEND: 3, PLACEBEFORE: 4 }, errors),
     PathPointSelection: enumOf('PathPointSelection', { ANCHORPOINT: 2, LEFTDIRECTION: 3, LEFTRIGHTPOINT: 5, NOSELECTION: 1, RIGHTDIRECTION: 4 }, errors),
     CoordinateSystem: enumOf('CoordinateSystem', { ARTBOARDCOORDINATESYSTEM: 1, DOCUMENTCOORDINATESYSTEM: 0 }, errors),
+    BlendModes: enumOf('BlendModes', { COLORBLEND: 12, COLORBURN: 5, COLORDODGE: 4, DARKEN: 8, DIFFERENCE: 10, EXCLUSION: 11,
+      HARDLIGHT: 7, HUE: 13, LIGHTEN: 9, LUMINOSITY: 15, MULTIPLY: 1, NORMAL: 0, OVERLAY: 3, SATURATIONBLEND: 14, SCREEN: 2, SOFTLIGHT: 6 }, errors),
   };
   const JUST_NAMES = Object.keys(E.Justification);
   const justName = (v) => {
@@ -659,6 +661,34 @@ function makeIllustrator(env, fsys) {
       return strict(t, new Set(props.concat(['_class'])), name, errors);
     };
   }
+  // Colours: fields and their largest value. Items keep plain copies ({ typename, red, ... }).
+  const COLOR_FIELDS = {
+    RGBColor: { red: 255, green: 255, blue: 255 }, CMYKColor: { cyan: 100, magenta: 100, yellow: 100, black: 100 },
+    GrayColor: { gray: 100 }, NoColor: {}, SpotColor: { tint: 100 }, GradientColor: {}, PatternColor: {},
+  };
+  function colorObject(data) {
+    const fields = COLOR_FIELDS[data.typename];
+    if (!fields) throw new Error('mock: unknown colour ' + data.typename);
+    const t = { typename: data.typename, _data: data };
+    for (const f of Object.keys(fields)) {
+      Object.defineProperty(t, f, {
+        get: () => (data[f] === undefined ? 0 : data[f]),
+        set: (v) => {
+          if (typeof v !== 'number' || !isFinite(v) || v < -1e-9 || v > fields[f] + 1e-9) throw new Error(`${data.typename}.${f} out of range: ${v}`);
+          data[f] = v;
+        },
+        enumerable: true,
+      });
+    }
+    return strict(t, new Set(['typename', '_data'].concat(Object.keys(fields))), data.typename, errors);
+  }
+  const plainColor = (c) => {
+    if (!c || !c._data) throw new Error('not a colour object');
+    return JSON.parse(JSON.stringify(c._data));
+  };
+  const BLACK = { typename: 'RGBColor', red: 0, green: 0, blue: 0 };
+  const NONE = { typename: 'NoColor' };
+  for (const name of Object.keys(COLOR_FIELDS)) classes[name] = function () { return colorObject({ typename: name }); };
 
   const documents = [];
   let active = null;
@@ -727,7 +757,8 @@ function makeIllustrator(env, fsys) {
       activeArtboard = i;
     };
     const layerSpecs = spec.layers || [{ name: 'Layer 1' }];
-    const layers = makeLayers(layerSpecs, null);
+    const docRef = () => ({ specs: layerSpecs, proxy });
+    initLayers(layerSpecs, null, docRef);
     // Loose items (spec.selection / spec.unselected) sit on top of the first layer.
     const loose = (spec.selection || []).concat(spec.unselected || []);
     for (const s of loose) s._layerSpec = layerSpecs[0];
@@ -775,8 +806,9 @@ function makeIllustrator(env, fsys) {
       get path() { return fileAbs ? fsys.Folder(path.dirname(fileAbs)) : fsys.Folder(''); },
       saved: true,
       rulerUnits: spec.rulerUnits !== undefined ? spec.rulerUnits : E.RulerUnits.Millimeters,
+      typename: 'Document',
       artboards: artboardsArr,
-      layers,
+      get layers() { return liveLayers(layerSpecs, null, docRef); },
       get selection() {
         if (spec.textEditing && typeof spec.textEditing === 'object') return editingRange(items, spec.textEditing);
         if (spec.textEditing) return strict({ typename: 'TextRange', length: 5, contents: 'hello' }, new Set(['typename', 'length', 'contents']), 'TextRange', errors);
@@ -792,7 +824,8 @@ function makeIllustrator(env, fsys) {
       // tests: names in stacking order, nested like the Layers panel
       _tree() {
         const itemTree = (list) => list.filter((s) => !s._removed).map((s) => (s.children ? { [s.name || s.type]: itemTree(s.children) } : (s.name || s.type)));
-        const layerTree = (specs) => specs.map((ls) => ({ layer: ls.name, items: itemTree(ls.items), layers: layerTree(ls.layers || []) }));
+        const layerTree = (specs) => specs.filter((ls) => !ls._removed)
+          .map((ls) => ({ layer: ls.name, items: itemTree(ls.items), layers: layerTree(ls.layers || []) }));
         return layerTree(layerSpecs);
       },
       // Align panel commands: align the selection to the key object, the artboard or the selection bounds
@@ -827,10 +860,10 @@ function makeIllustrator(env, fsys) {
           else shiftSpec(s, 0, d);
         }
       },
-      activeLayer: layers[0],
+      get activeLayer() { return layerProxy(layerSpecs.find((l) => !l._removed)); },
       _items: topItems,
       _artboards: artboards,
-      _layers: layers,
+      get _layers() { return layerSpecs.filter((l) => !l._removed).map(layerProxy); },
       _exports: [],
       get _activeArtboard() { return activeArtboard; },
       activate() { appProxy.activeDocument = proxy; },
@@ -881,7 +914,7 @@ function makeIllustrator(env, fsys) {
         proxy._exports.push(record);
       },
     };
-    const proxy = strict(d, new Set(['name', 'fullName', 'path', 'saved', 'rulerUnits', 'artboards', 'layers', 'selection',
+    const proxy = strict(d, new Set(['typename', 'name', 'fullName', 'path', 'saved', 'rulerUnits', 'artboards', 'layers', 'selection',
       'activeLayer', 'activate', 'exportFile', 'exportForScreens', 'pageItems', '_items', '_artboards', '_layers', '_exports',
       '_select', '_find', '_tree', '_menu', '_activeArtboard']), 'Document', errors);
     return proxy;
@@ -922,47 +955,97 @@ function makeIllustrator(env, fsys) {
 
   // Layer spec: { name, locked, visible, items: [item specs, top first], layers: [sublayers] }
   const layerProxies = new WeakMap();
-  function makeLayers(specs, parent) {
-    return env.varr(specs.map((s) => {
+  env.createdLayers = [];
+  function initLayers(specs, parent, docRef) {
+    for (const s of specs) {
       s._parentLayer = parent;
+      s._docRef = docRef;
       s.items = s.items || [];
+      s.layers = s.layers || [];
       for (const it of s.items) {
         it._layerSpec = s;
         it._parentSpec = null;
       }
-      const t = { typename: 'Layer', _spec: s };
-      Object.defineProperty(t, 'name', {
-        get: () => s.name,
+      initLayers(s.layers, s, docRef);
+    }
+  }
+  const siblingsOf = (s) => (s._parentLayer ? s._parentLayer.layers : s._docRef().specs);
+  // doc.layers / layer.layers: the live layers, with add() putting a new layer on top
+  function liveLayers(list, parent, docRef) {
+    const coll = env.varr(list.filter((l) => !l._removed).map(layerProxy));
+    coll.add = () => {
+      const why = parent ? layerBlocked(parent) : null;
+      if (why) throw new Error('Target layer cannot be modified (' + why + ')');
+      const fresh = { name: 'Layer ' + (env.createdLayers.length + 100) };
+      initLayers([fresh], parent, docRef);
+      list.unshift(fresh);
+      env.createdLayers.push(fresh);
+      return layerProxy(fresh);
+    };
+    return coll;
+  }
+  function layerProxy(s) {
+    if (layerProxies.has(s)) return layerProxies.get(s);
+    const t = { typename: 'Layer', _spec: s };
+    Object.defineProperty(t, 'name', {
+      get: () => s.name,
+      set: (v) => {
+        if (typeof v !== 'string') throw new Error('layer name must be string');
+        if (s.lockedName) throw new Error('Target layer cannot be modified');
+        s.name = v;
+      },
+      enumerable: true,
+    });
+    for (const key of ['locked', 'visible']) {
+      Object.defineProperty(t, key, {
+        get: () => (key === 'visible' ? s.visible !== false : !!s.locked),
         set: (v) => {
-          if (typeof v !== 'string') throw new Error('layer name must be string');
-          if (s.lockedName) throw new Error('Target layer cannot be modified');
-          s.name = v;
+          if (typeof v !== 'boolean') throw new Error('layer.' + key + ' must be boolean');
+          s[key] = v;
         },
         enumerable: true,
       });
-      for (const key of ['locked', 'visible']) {
-        Object.defineProperty(t, key, {
-          get: () => (key === 'visible' ? s.visible !== false : !!s.locked),
-          set: (v) => {
-            if (typeof v !== 'boolean') throw new Error('layer.' + key + ' must be boolean');
-            s[key] = v;
-          },
-          enumerable: true,
-        });
-      }
-      t.layers = makeLayers(s.layers || [], s);
-      Object.defineProperty(t, 'pageItems', { get: () => env.varr(s.items.filter((c) => !c._removed).map(proxyOf)), enumerable: true });
-      Object.defineProperties(t, Object.getOwnPropertyDescriptors(containerApi(s, 'layer')));
-      const proxy = strict(t, new Set(['typename', 'name', 'layers', 'locked', 'visible', 'pageItems', 'groupItems', 'pathItems',
-        'compoundPathItems', '_spec']), 'Layer', errors);
-      layerProxies.set(s, proxy);
+    }
+    Object.defineProperty(t, 'layers', { get: () => liveLayers(s.layers, s, s._docRef), enumerable: true });
+    Object.defineProperty(t, 'pageItems', { get: () => env.varr(s.items.filter((c) => !c._removed).map(proxyOf)), enumerable: true });
+    Object.defineProperty(t, 'parent', { get: () => (s._parentLayer ? layerProxy(s._parentLayer) : s._docRef().proxy), enumerable: true });
+    Object.defineProperties(t, Object.getOwnPropertyDescriptors(containerApi(s, 'layer')));
+    // layer.move(otherLayer, PLACEBEFORE | PLACEAFTER): right above / below another layer
+    t.move = (target, placement) => {
+      const P = E.ElementPlacement;
+      if (!target || target.typename !== 'Layer') throw new Error('mock: a layer moves next to another layer only');
+      if (placement !== P.PLACEBEFORE && placement !== P.PLACEAFTER) throw new Error('mock: layer.move supports PLACEBEFORE / PLACEAFTER');
+      const ts = target._spec;
+      for (let p = ts; p; p = p._parentLayer) if (p === s) throw new Error('move: cannot move a layer into itself');
+      const from = siblingsOf(s);
+      from.splice(from.indexOf(s), 1);
+      const dest = siblingsOf(ts);
+      dest.splice(dest.indexOf(ts) + (placement === P.PLACEAFTER ? 1 : 0), 0, s);
+      s._parentLayer = ts._parentLayer;
       return proxy;
-    }));
+    };
+    t.remove = () => {
+      for (let p = s; p; p = p._parentLayer) if (p.locked) throw new Error('Target layer cannot be modified (layer ' + p.name + ' is locked)');
+      const list = siblingsOf(s);
+      if (!s._parentLayer && list.filter((l) => !l._removed).length <= 1) throw new Error('A document must have at least one layer');
+      const kill = (ls) => {
+        ls._removed = true;
+        ls.items.forEach(removeSpec);
+        ls.layers.forEach(kill);
+      };
+      kill(s);
+      list.splice(list.indexOf(s), 1);
+    };
+    const proxy = strict(t, new Set(['typename', 'name', 'layers', 'locked', 'visible', 'pageItems', 'parent', 'move', 'remove',
+      'groupItems', 'pathItems', 'compoundPathItems', '_spec']), 'Layer', errors);
+    layerProxies.set(s, proxy);
+    return proxy;
   }
 
   // ---- layer tree helpers -----------------------------------------------------
   function walkLayers(specs, fn) {
     for (const ls of specs) {
+      if (ls._removed) continue;
       fn(ls);
       walkLayers(ls.layers || [], fn);
     }
@@ -1060,12 +1143,12 @@ function makeIllustrator(env, fsys) {
 
   const ITEM_COMMON = ['typename', 'name', 'geometricBounds', 'visibleBounds', 'translate', 'rotate', 'resize',
     'duplicate', 'remove', 'move', 'selected', 'tags', 'locked', 'hidden', 'parent', 'layer', 'left', 'top', 'width', 'height',
-    'position', 'uuid', 'editable', '_spec'];
+    'position', 'uuid', 'editable', 'opacity', 'blendingMode', '_spec'];
   const ITEM_EXTRA = {
     TextFrame: ['contents', 'textRange', 'kind', 'orientation', 'paragraphs', 'story', 'anchor', 'lines', 'matrix',
       'createOutline', 'characters', 'words'],
     GroupItem: ['clipped', 'pageItems', 'pathItems', 'compoundPathItems', 'groupItems', 'textFrames'],
-    PathItem: ['clipping', 'filled', 'stroked', 'strokeWidth', 'pathPoints', 'guides'],
+    PathItem: ['clipping', 'filled', 'stroked', 'strokeWidth', 'pathPoints', 'guides', 'fillColor', 'strokeColor'],
     CompoundPathItem: ['pathItems'],
     PlacedItem: ['matrix', 'file'],
     RasterItem: ['matrix'],
@@ -1344,10 +1427,29 @@ function makeIllustrator(env, fsys) {
       });
     }
     Object.defineProperty(t, 'editable', { get: () => !blocked(s), enumerable: true });
+    Object.defineProperty(t, 'opacity', {
+      get: () => (s.opacity === undefined ? 100 : s.opacity),
+      set: (v) => {
+        if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > 100) throw new Error('opacity out of range: ' + v);
+        assertEditable(s);
+        s.opacity = v;
+      },
+      enumerable: true,
+    });
+    Object.defineProperty(t, 'blendingMode', {
+      get: () => E.BlendModes[s.blend || 'NORMAL'],
+      set: (v) => {
+        const name = Object.keys(E.BlendModes).find((k) => E.BlendModes[k] === v);
+        if (!name) throw new Error('bad blending mode');
+        assertEditable(s);
+        s.blend = name;
+      },
+      enumerable: true,
+    });
     Object.defineProperty(t, 'parent', {
       get: () => {
         if (s._parentSpec) return proxyOf(s._parentSpec);
-        if (s._layerSpec) return layerProxies.get(s._layerSpec);
+        if (s._layerSpec) return layerProxy(s._layerSpec);
         throw new Error('mock: this object is not in the document');
       },
       enumerable: true,
@@ -1356,7 +1458,7 @@ function makeIllustrator(env, fsys) {
       get: () => {
         const ls = topOf(s)._layerSpec;
         if (!ls) throw new Error('mock: this object is not in the document');
-        return layerProxies.get(ls);
+        return layerProxy(ls);
       },
       enumerable: true,
     });
@@ -1419,6 +1521,16 @@ function makeIllustrator(env, fsys) {
         });
       }
       Object.defineProperty(t, 'pathPoints', { get: () => pathPointsOf(s), enumerable: true });
+      for (const [key, fallback] of [['fillColor', BLACK], ['strokeColor', NONE]]) {
+        Object.defineProperty(t, key, {
+          get: () => colorObject(JSON.parse(JSON.stringify(s[key] || fallback))),
+          set: (v) => {
+            assertEditable(s);
+            s[key] = plainColor(v);
+          },
+          enumerable: true,
+        });
+      }
     }
     if (s.type === 'CompoundPathItem') {
       for (const c of s.paths || []) c._parentSpec = s;
@@ -1535,6 +1647,9 @@ function makeIllustrator(env, fsys) {
     if (m.contents === undefined) m.contents = 'text';
     const cps = Array.from(m.contents);
     if (!m.tracking || m.tracking.length !== cps.length) m.tracking = cps.map((c, i) => (m.tracking && m.tracking[i]) || 0);
+    for (const [key, fallback] of [['fills', m.fill || BLACK], ['strokes', m.stroke || NONE]]) {
+      if (!m[key] || m[key].length !== cps.length) m[key] = cps.map((c, i) => (m[key] && m[key][i]) || JSON.parse(JSON.stringify(fallback)));
+    }
     return cps;
   }
 
@@ -1550,8 +1665,20 @@ function makeIllustrator(env, fsys) {
       },
       enumerable: true,
     });
-    const ch = { contents: cps[index], length: 1, characterAttributes: strict(attrs, new Set(['tracking', 'size']), 'CharacterAttributes', errors) };
+    paintAttributes(attrs, m, [index]);
+    const ch = { contents: cps[index], length: 1, characterAttributes: strict(attrs, new Set(['tracking', 'size', 'fillColor', 'strokeColor']), 'CharacterAttributes', errors) };
     return strict(ch, new Set(['contents', 'length', 'characterAttributes']), 'Character', errors);
+  }
+
+  // fillColor / strokeColor of characters: reading gives the first one, setting paints them all
+  function paintAttributes(attrs, m, indices) {
+    for (const [key, list] of [['fillColor', 'fills'], ['strokeColor', 'strokes']]) {
+      Object.defineProperty(attrs, key, {
+        get: () => { codePoints(m); return colorObject(JSON.parse(JSON.stringify(m[list][indices[0]]))); },
+        set: (v) => { codePoints(m); for (const i of indices) m[list][i] = plainColor(v); },
+        enumerable: true,
+      });
+    }
   }
 
   // Characters collection: indexing creates character objects lazily, like DOM calls in Illustrator.
@@ -1607,6 +1734,9 @@ function makeIllustrator(env, fsys) {
     Object.defineProperty(r, 'contents', { get: () => codePoints(m).slice(start, start + length).join(''), enumerable: true });
     Object.defineProperty(r, 'characters', { get: () => charactersOf(m, start, length), enumerable: true });
     Object.defineProperty(r, 'story', { get: () => story(), enumerable: true });
+    const charAttrs = {};
+    paintAttributes(charAttrs, m, Array.from({ length: Math.max(1, length) }, (_, i) => start + i));
+    r.characterAttributes = strict(charAttrs, new Set(['fillColor', 'strokeColor']), 'CharacterAttributes', errors);
     return strict(r, new Set(['typename', 'length', 'paragraphAttributes', 'paragraphs', 'story', 'contents', 'characters',
       'characterAttributes', 'parent']), 'TextRange', errors);
   }

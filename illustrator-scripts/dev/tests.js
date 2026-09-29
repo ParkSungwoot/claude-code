@@ -1761,6 +1761,226 @@ test('essential: artwork trim clips only what sticks out, in place, with the art
   noLeaks(env);
 });
 
+// ---- COC_illust Essential: layers, opacity, artboard fit, untrim -------------
+const rgb = (r, g, b) => ({ typename: 'RGBColor', red: r, green: g, blue: b });
+const cmyk = (c, m, y, k) => ({ typename: 'CMYKColor', cyan: c, magenta: m, yellow: y, black: k });
+const gray = (g) => ({ typename: 'GrayColor', gray: g });
+const colorClose = (actual, expected, label) => {
+  assert.strictEqual(actual.typename, expected.typename, label + ' colour type');
+  for (const k of Object.keys(expected)) {
+    if (k !== 'typename') assert.ok(Math.abs(actual[k] - expected[k]) < 1e-6, `${label} ${k}: ${actual[k]} vs ${expected[k]}`);
+  }
+};
+const layerNames = (tree) => tree.map((l) => l.layer);
+
+test('essential: delete empty layers (sublayers first, locked ones too, one layer always stays)', () => {
+  let { env, ui } = openPanel({
+    documents: [{
+      layers: [
+        { name: 'A', items: [rect('a', 0, 0, 10, 10)] },
+        { name: 'B' },
+        { name: 'C', layers: [{ name: 'C1' }, { name: 'C2', items: [rect('c', 0, 0, 10, 10)] }] },
+        { name: 'D', locked: true },
+        { name: 'E', layers: [{ name: 'E1', layers: [{ name: 'E1a' }] }] },
+        { name: 'F', locked: true, items: [rect('f', 0, 0, 10, 10)], layers: [{ name: 'F1' }] },
+      ],
+    }],
+  });
+  ui.selectTab('정리');
+  ui.click(ui.button('빈 레이어 삭제'));
+  const tree = env.ai.documents[0]._tree();
+  assert.deepStrictEqual(layerNames(tree), ['A', 'C', 'F']);
+  assert.deepStrictEqual(layerNames(tree[1].layers), ['C2']);
+  assert.deepStrictEqual(tree[2].layers, [], 'empty sublayer of a locked layer removed');
+  assert.strictEqual(env.ai.documents[0]._layers[2].locked, true, 'F locked again');
+  assert.strictEqual(panelStatus(ui), '빈 레이어 7개를 삭제했습니다.');
+  ui.click(ui.button('빈 레이어 삭제'));
+  assert.strictEqual(panelStatus(ui), '빈 레이어가 없습니다.');
+
+  ({ env, ui } = openPanel({ documents: [{ layers: [{ name: 'X' }, { name: 'Y' }] }] }));
+  ui.selectTab('정리');
+  ui.click(ui.button('빈 레이어 삭제'));
+  assert.deepStrictEqual(layerNames(env.ai.documents[0]._tree()), ['X'], 'a document keeps one layer');
+  assert.strictEqual(panelStatus(ui), '빈 레이어 1개를 삭제했습니다.');
+});
+
+test('essential: opacity to layer names — own layers in stacking order, 100% opacity, states kept', () => {
+  const { env, ui } = openPanel({
+    documents: [{
+      layers: [
+        { name: 'Art', items: [rect('a', 0, 0, 10, 10), rect('X', 20, 0, 10, 10, { opacity: 60 }), rect('b', 40, 0, 10, 10), rect('c', 60, 0, 10, 10), rect('Y', 80, 0, 10, 10, { opacity: 30 })] },
+        { name: 'Solo_(opacity 20%)', items: [rect('Z', 0, -20, 10, 10, { opacity: 45.25 })] },
+        { name: 'Nested', items: [grp('G', [rect('g1', 0, -40, 10, 10, { opacity: 50 }), rect('g2', 20, -40, 10, 10)])] },
+        { name: 'Locked', locked: true, items: [rect('W', 0, -60, 10, 10, { opacity: 80, locked: true })] },
+        { name: 'H', visible: false, items: [rect('h1', 0, -80, 10, 10), rect('h2', 20, -80, 10, 10, { opacity: 70 })] },
+        { name: 'P', items: [rect('p1', 0, -100, 10, 10), rect('p2', 20, -100, 10, 10, { opacity: 50 })], layers: [{ name: 'S', items: [rect('s1', 0, -120, 10, 10)] }] },
+      ],
+    }],
+  });
+  ui.selectTab('정리');
+  ui.click(ui.button('오퍼시티 표시'));
+  const doc = env.ai.documents[0];
+  const tree = doc._tree();
+  assert.deepStrictEqual(tree.map((l) => [l.layer, l.items]), [
+    ['Art', ['a']], ['Art_(opacity 60%)', ['X']], ['Art', ['b', 'c']], ['Art_(opacity 30%)', ['Y']],
+    ['Solo_(opacity 45.3%)', ['Z']],
+    ['Nested', [{ G: ['g1', 'g2'] }]],
+    ['Locked_(opacity 80%)', ['W']],
+    ['H', ['h1']], ['H_(opacity 70%)', ['h2']],
+    ['P', ['p1']], ['P_(opacity 50%)', ['p2']], ['P', []],
+  ]);
+  assert.deepStrictEqual(layerNames(tree[11].layers), ['S'], 'sublayers stay in the original layer');
+  for (const n of ['X', 'Y', 'Z', 'W', 'h2', 'p2']) assert.strictEqual(doc._find(n).opacity, 100, n + ' at 100%');
+  assert.strictEqual(doc._find('g1').opacity, 50, 'objects inside groups are left alone');
+  const layers = doc._layers;
+  assert.ok(layers[6].locked && doc._find('W').locked, 'locked layer and object locked again');
+  assert.ok(!layers[7].visible && !layers[8].visible, 'the new layer from a hidden layer is hidden too');
+  assert.ok(layers.filter((l, i) => i !== 6).every((l) => !l.locked));
+  assert.strictEqual(panelStatus(ui), '불투명도를 레이어 이름으로 옮겼습니다: 객체 6개 (새 레이어 6개)\n그룹 안의 반투명 객체 1개는 따로 뺄 수 없어 그대로 두었습니다.');
+  ui.click(ui.button('오퍼시티 표시'));
+  assert.strictEqual(panelStatus(ui), '레이어에 바로 놓인 반투명 객체가 없습니다.\n그룹 안의 반투명 객체 1개는 따로 뺄 수 없어 그대로 두었습니다.');
+});
+
+test('essential: opacity into colour over the base (normal, multiply, screen; RGB, CMYK, grey)', () => {
+  const flatten = (selection) => {
+    const { env, ui } = openPanel({ documents: [{ selection }] });
+    ui.selectTab('정리');
+    ui.click(ui.button('오퍼시티 대신 컬러로'));
+    return { doc: env.ai.documents[0], status: panelStatus(ui) };
+  };
+  // RGB, normal: fill and stroke mixed half way with the blue base
+  let r = flatten([
+    rect('top', 10, -10, 50, 50, { opacity: 50, fillColor: rgb(255, 0, 0), stroked: true, strokeColor: rgb(255, 255, 255) }),
+    rect('base', 0, 0, 100, 100, { fillColor: rgb(0, 0, 255) }),
+  ]);
+  let top = r.doc._find('top');
+  colorClose(top.fillColor, rgb(127.5, 0, 127.5), 'fill');
+  colorClose(top.strokeColor, rgb(127.5, 127.5, 255), 'stroke');
+  assert.strictEqual(top.opacity, 100);
+  colorClose(r.doc._find('base').fillColor, rgb(0, 0, 255), 'base untouched');
+  assert.strictEqual(r.status, '불투명도 대신 색으로 바꿨습니다: 객체 1개');
+
+  // grey, multiply: light 0.5 × 0.8 at 50% over 0.8 → 0.6 → 40% grey; the mode becomes Normal
+  r = flatten([rect('top', 0, 0, 10, 10, { opacity: 50, blend: 'MULTIPLY', fillColor: gray(50) }), rect('base', 0, 0, 100, 100, { fillColor: gray(20) })]);
+  colorClose(r.doc._find('top').fillColor, gray(40), 'multiply');
+  assert.strictEqual(r.doc._find('top').blend, 'NORMAL');
+
+  // RGB, screen at 80%
+  r = flatten([rect('top', 0, 0, 10, 10, { opacity: 80, blend: 'SCREEN', fillColor: rgb(200, 0, 50) }), rect('base', 0, 0, 100, 100, { fillColor: rgb(100, 100, 100) })]);
+  const screen = (t, b) => Math.round((0.8 * (1 - (1 - t / 255) * (1 - b / 255)) + 0.2 * (b / 255)) * 255 * 1000) / 1000;
+  colorClose(r.doc._find('top').fillColor, rgb(screen(200, 100), screen(0, 100), screen(50, 100)), 'screen');
+
+  // CMYK: cyan at 40% over magenta
+  r = flatten([rect('top', 0, 0, 10, 10, { opacity: 40, fillColor: cmyk(100, 0, 0, 0) }), rect('base', 0, 0, 100, 100, { fillColor: cmyk(0, 100, 0, 0) })]);
+  colorClose(r.doc._find('top').fillColor, cmyk(40, 60, 0, 0), 'cmyk');
+
+  // grey over RGB: black at 25% darkens yellow
+  r = flatten([rect('top', 0, 0, 10, 10, { opacity: 25, fillColor: gray(100) }), rect('base', 0, 0, 100, 100, { fillColor: rgb(255, 255, 0) })]);
+  colorClose(r.doc._find('top').fillColor, rgb(191.25, 191.25, 0), 'grey on rgb');
+});
+
+test('essential: opacity into colour for groups, text and several objects; what it cannot do', () => {
+  const run1 = (selection) => {
+    const { env, ui } = openPanel({ documents: [{ selection }] });
+    ui.selectTab('정리');
+    ui.click(ui.button('오퍼시티 대신 컬러로'));
+    return { doc: env.ai.documents[0], status: panelStatus(ui) };
+  };
+  const base = () => rect('base', 0, 0, 200, 200, { fillColor: rgb(0, 0, 0) });
+  let r = run1([
+    grp('G', [rect('g1', 0, 0, 10, 10, { fillColor: rgb(200, 100, 0) }), rect('g2', 20, 0, 10, 10, { fillColor: rgb(0, 50, 250) })], { opacity: 50 }),
+    rect('solid', 0, -80, 10, 10, { fillColor: rgb(9, 9, 9) }),
+    rect('grad', 0, -100, 10, 10, { opacity: 50, fillColor: { typename: 'GradientColor' } }),
+    Object.assign(rect('img', 0, -120, 10, 10, { opacity: 50 }), { type: 'PlacedItem' }),
+    base(),
+  ]);
+  colorClose(r.doc._find('g1').fillColor, rgb(100, 50, 0), 'group child 1');
+  colorClose(r.doc._find('g2').fillColor, rgb(0, 25, 125), 'group child 2');
+  assert.strictEqual(r.doc._find('G').opacity, 100);
+  colorClose(r.doc._find('solid').fillColor, rgb(9, 9, 9), 'opaque objects untouched');
+  assert.strictEqual(r.doc._find('grad').opacity, 50, 'unsupported objects untouched');
+  assert.strictEqual(r.doc._find('img').opacity, 50);
+  assert.strictEqual(r.status, '불투명도 대신 색으로 바꿨습니다: 객체 1개\n그라디언트 · 패턴 · 이미지 · 다른 합성 모드라 바꾸지 못한 객체 2개');
+
+  // text: every character mixed (white at 60% over black)
+  const { env, ui } = openPanel({
+    documents: [{ selection: [Object.assign(ptext('T', [0, -50], [[40, 'LEFT']], { contents: 'ab', fill: rgb(255, 255, 255) }), { opacity: 60 }), base()] }],
+  });
+  ui.selectTab('정리');
+  ui.click(ui.button('오퍼시티 대신 컬러로'));
+  const t = env.ai.documents[0]._find('T').text;
+  assert.deepStrictEqual(t.fills.map((c) => [c.red, c.green, c.blue]), [[153, 153, 153], [153, 153, 153]]);
+  assert.strictEqual(panelStatus(ui), '불투명도 대신 색으로 바꿨습니다: 객체 1개');
+
+  // mistakes
+  assert.strictEqual(run1([base()]).status, '베이스 객체와 그 위의 반투명 객체를 함께 선택하세요. (2개 이상)');
+  assert.strictEqual(run1([rect('top', 0, 0, 10, 10, { opacity: 50 }), rect('base', 0, 0, 100, 100, { filled: false })]).status,
+    '맨 아래 베이스 객체에 단색 칠이 없습니다. (RGB · CMYK · 회색 색상만 됩니다)');
+  assert.strictEqual(run1([rect('top', 0, 0, 10, 10), base()]).status, '베이스 위에 불투명도가 100%가 아닌 객체가 없습니다.');
+  r = run1([rect('top', 0, 0, 10, 10, { opacity: 50, fillColor: rgb(255, 0, 0) }), rect('base', 0, 0, 100, 100, { fillColor: cmyk(0, 0, 0, 50) })]);
+  assert.strictEqual(r.status, '바꾼 객체가 없습니다.\n그라디언트 · 패턴 · 이미지 · 다른 합성 모드라 바꾸지 못한 객체 1개', 'RGB over CMYK');
+});
+
+test('essential: fit to artboard width / height (its own artboard, ratio option, strokes)', () => {
+  const boards = () => [{ name: '1', rect: [0, 0, 200, -100] }, { name: '2', rect: [300, 0, 400, -200] }];
+  const fit = (button, selection, ratio = true) => {
+    const { env, ui } = openPanel({ documents: [{ artboards: boards(), selection }] });
+    if (!ratio) ui.click(ui.find('checkbox', '비율 유지'));
+    ui.click(ui.button(button));
+    return { env, ui };
+  };
+  let { env, ui } = fit('아트보드 너비에 맞게', [rect('A', 30, -20, 20, 10), rect('B', 310, -10, 50, 20), rect('C', 600, 0, 10, 10)]);
+  assertBounds(specOf(env, 'A').bounds, [0, 25, 200, -75], 'A spans artboard 1, centre height kept');
+  assertBounds(specOf(env, 'B').bounds, [300, 0, 400, -40], 'B spans artboard 2');
+  assertBounds(specOf(env, 'C').bounds, [0, 95, 200, -105], 'off-artboard object uses the active artboard');
+  assert.deepStrictEqual(env.coordinateLog, ['document', 'artboard']);
+  assert.strictEqual(panelStatus(ui), '아트보드 너비에 맞췄습니다: 객체 3개');
+
+  ({ env, ui } = fit('아트보드 높이에 맞게', [rect('A', 30, -20, 20, 10), rect('line', 0, -50, 100, 0)]));
+  assertBounds(specOf(env, 'A').bounds, [-60, 0, 140, -100], 'A as tall as the artboard, top on its top');
+  assert.strictEqual(panelStatus(ui), '아트보드 높이에 맞췄습니다: 객체 1개\n크기가 0이라 건너뛴 객체 1개');
+
+  ({ env } = fit('아트보드 너비에 맞게', [rect('A', 30, -20, 20, 10)], false));
+  assertBounds(specOf(env, 'A').bounds, [0, -20, 200, -30], 'without ratio only the width changes');
+
+  ({ env } = fit('아트보드 너비에 맞게', [rect('S', 50, -40, 20, 10, { stroke: 4 })]));
+  const vb = Array.from(env.ai.documents[0]._items[0].visibleBounds);
+  assert.ok(near(vb[0], 0, 1e-6) && near(vb[2], 200, 0.01), 'stroke included: visible edges on the artboard, got ' + vb);
+});
+
+test('essential: untrim releases only the trim clipping groups and restores the order', () => {
+  const doc = () => ({
+    artboards: [{ name: '1', rect: [0, 0, 100, -100] }, { name: '2', rect: [100, 0, 200, -100] }],
+    layers: [{
+      name: 'Art',
+      items: [
+        rect('inside', 10, -10, 40, 40),
+        rect('bleed', -10, 10, 60, 60),
+        rect('spanOut', 80, 10, 40, 60),
+        grp('own', [pts('ownMask', [[10, -60], [10, -80], [40, -80], [40, -60]], { clipping: true }), rect('ownArt', 0, -55, 60, 40)], { clipped: true }),
+        rect('stroke', 0, -60, 90, 30, { stroke: 4 }),
+      ],
+    }],
+  });
+  const { env, ui } = openPanel({ documents: [doc()] });
+  ui.selectTab('정리');
+  ui.click(ui.button('아트워크 트림'));
+  assert.strictEqual(panelStatus(ui), '아트보드 밖으로 나간 객체 3개를 아트보드 크기로 잘랐습니다.');
+  const d = env.ai.documents[0];
+  d._find('stroke')._parentSpec.locked = true; // a locked trim stays
+  ui.click(ui.button('트림 해제'));
+  assert.deepStrictEqual(d._tree()[0].items, ['inside', 'bleed', 'spanOut', { own: ['ownMask', 'ownArt'] }, { GroupItem: ['PathItem', 'stroke'] }]);
+  assert.ok(d._find('own').clipped, 'your own clipping group stays');
+  assert.strictEqual(panelStatus(ui), '트림을 해제했습니다: 2개\n잠겼거나 모양이 바뀐 트림 1개는 그대로 두었습니다.');
+  d._find('stroke')._parentSpec.locked = false;
+  ui.click(ui.button('트림 해제'));
+  assert.deepStrictEqual(d._tree()[0].items, ['inside', 'bleed', 'spanOut', { own: ['ownMask', 'ownArt'] }, 'stroke']);
+  ui.click(ui.button('트림 해제'));
+  assert.strictEqual(panelStatus(ui), '해제할 트림이 없습니다.');
+  ui.click(ui.button('아트워크 트림'));
+  assert.strictEqual(panelStatus(ui), '아트보드 밖으로 나간 객체 3개를 아트보드 크기로 잘랐습니다.', 'trim works again after untrim');
+});
+
 // ===========================================================================
 let failed = 0;
 for (const t of tests) {

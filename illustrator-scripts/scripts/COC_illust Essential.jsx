@@ -13,6 +13,7 @@
  *    스포이드            : 두 객체 사이의 간격을 읽어 와서 다른 곳에 똑같이 적용
  *    격자로 정리          : 흩어진 객체의 행과 열을 찾아 같은 간격의 격자로
  *    크기 맞추기          : 폭/높이를 가장 큰·가장 작은·맨 위 객체·키 오브젝트에 맞춤 (비율 유지 선택)
+ *    아트보드 너비/높이에 맞게 : 객체를 놓인 아트보드의 너비(높이)에 딱 맞게
  *  [회전]
  *    회전                : 0°로 초기화 / 맨 위 객체 각도로 / 입력한 각도로
  *    포인트 기준 회전     : 선택한 두 점이 수직 또는 수평이 되도록 객체를 돌림
@@ -23,7 +24,10 @@
  *  [정리]
  *    아트보드 리어레인지   : 놓인 순서(왼쪽 위 → 오른쪽 아래)대로 번호를 다시 매기고 격자로 정리
  *    아트보드 리네이밍     : 아트보드 이름을 1, 2, 3 … 으로
- *    아트워크 트림        : 아트보드 밖으로 나간 객체만 아트보드 크기로 클리핑 마스크
+ *    아트워크 트림 / 트림 해제 : 아트보드 밖으로 나간 객체만 아트보드 크기로 클리핑 마스크 / 되돌리기
+ *    빈 레이어 삭제       : 아무것도 없는 레이어와 하위 레이어를 지움
+ *    오퍼시티 표시        : 반투명 객체를 제 레이어로 빼고 이름에 '_(opacity 60%)', 불투명도는 100% (애프터 이펙트용)
+ *    오퍼시티 대신 컬러로  : 베이스 위의 반투명 객체를 같은 모습의 불투명한 색으로
  *  [측정 기준] (간격 · 격자 · 크기 · 기준선에 공통)
  *    선 두께 포함 / 글자 모양 기준(텍스트 상자 대신 실제 글자 외곽) / 클리핑 마스크는 보이는 모양 기준
  *
@@ -187,9 +191,15 @@
     var ddReference = gReference.add('dropdownlist', undefined, REFERENCES);
     ddReference.selection = clampIndex(s.reference, REFERENCES.length);
     ddReference.helpTip = '키 오브젝트: 여러 객체를 선택한 뒤 기준으로 쓸 객체를 한 번 더 클릭해 굵은 테두리로 만드세요.';
-    var cbRatio = pSize.add('checkbox', undefined, '비율 유지');
+    var gSizeGo = addRow(pSize);
+    var cbRatio = gSizeGo.add('checkbox', undefined, '비율 유지');
     cbRatio.value = s.keepRatio;
-    var btnSize = pSize.add('button', undefined, '크기 맞추기');
+    var btnSize = gSizeGo.add('button', undefined, '크기 맞추기');
+    var gFit = addRow(pSize);
+    var btnFitWidth = gFit.add('button', undefined, '아트보드 너비에 맞게');
+    var btnFitHeight = gFit.add('button', undefined, '아트보드 높이에 맞게');
+    btnFitWidth.helpTip = '선택한 객체를 놓인 아트보드의 너비에 맞추고 양옆을 아트보드에 붙입니다. (비율 유지를 따름)';
+    btnFitHeight.helpTip = '선택한 객체를 놓인 아트보드의 높이에 맞추고 위아래를 아트보드에 붙입니다. (비율 유지를 따름)';
 
     // ---- [회전] -------------------------------------------------------------
     var pRotate = addPanel(tabRotate, '회전');
@@ -288,9 +298,21 @@
     cbPad.helpTip = '자릿수를 맞춥니다. 내보낸 파일이 이름 순서대로 정렬됩니다.';
 
     var pArtwork = addPanel(tabOrganize, '아트워크');
-    pArtwork.alignChildren = ['fill', 'top'];
-    var btnTrim = pArtwork.add('button', undefined, '아트워크 트림');
+    var gTrim = addRow(pArtwork);
+    var btnTrim = gTrim.add('button', undefined, '아트워크 트림');
+    var btnUntrim = gTrim.add('button', undefined, '트림 해제');
     btnTrim.helpTip = '아트보드 밖으로 나간 객체만 아트보드 크기의 클리핑 마스크로 잘라 냅니다. 잠기거나 숨긴 객체는 건너뜁니다.';
+    btnUntrim.helpTip = '아트워크 트림으로 만든 클리핑 마스크를 모두 풀어 원래대로 되돌립니다.';
+
+    var pLayers = addPanel(tabOrganize, '레이어 · 불투명도');
+    var btnEmptyLayers = pLayers.add('button', undefined, '빈 레이어 삭제');
+    btnEmptyLayers.helpTip = '아무것도 들어 있지 않은 레이어와 하위 레이어를 지웁니다. (잠긴 빈 레이어 포함)';
+    var gOpacity = addRow(pLayers);
+    var btnOpacityLayers = gOpacity.add('button', undefined, '오퍼시티 표시');
+    var btnFlatten = gOpacity.add('button', undefined, '오퍼시티 대신 컬러로');
+    btnOpacityLayers.helpTip = '불투명도가 100%가 아닌 객체를 제 레이어로 빼고 레이어 이름 뒤에 _(opacity 60%)처럼 적은 뒤, ' +
+      '불투명도를 100%로 바꿉니다. 애프터 이펙트에서 레이어 불투명도로 다시 주세요.';
+    btnFlatten.helpTip = '베이스 객체와 그 위의 반투명 객체를 함께 선택하고 누르면, 반투명 객체를 불투명도 100%의 같은 모습 색으로 바꿉니다.';
 
     // ---- 공통: 측정 기준 ----------------------------------------------------
     var gMeasure = addRow(win);
@@ -321,6 +343,12 @@
       send({ action: 'rename', pad: cbPad.value });
     };
     btnTrim.onClick = function () { send({ action: 'trim' }); };
+    btnUntrim.onClick = function () { send({ action: 'untrim' }); };
+    btnEmptyLayers.onClick = function () { send({ action: 'emptylayers' }); };
+    btnOpacityLayers.onClick = function () { send({ action: 'opacitylayers' }); };
+    btnFlatten.onClick = function () { send({ action: 'flatten' }); };
+    btnFitWidth.onClick = function () { fitToArtboard('w'); };
+    btnFitHeight.onClick = function () { fitToArtboard('h'); };
     btnAngle.onClick = function () {
       var angle = parseNumber(etAngle.text);
       if (isNaN(angle)) return setStatus('각도는 숫자로 입력해 주세요.');
@@ -442,6 +470,11 @@
       send({ action: 'justify', justification: name });
     }
 
+    function fitToArtboard(side) {
+      remember();
+      send(withMeasure({ action: 'fitboard', side: side, keepRatio: cbRatio.value }));
+    }
+
     function arrangeArtboards() {
       var gap = parseNumber(etBoardGap.text);
       if (isNaN(gap) || gap < 0) return setStatus('아트보드 간격은 0 이상의 숫자로 입력해 주세요.');
@@ -533,6 +566,33 @@
       if (p[1] === 'rename') {
         return setStatus('아트보드 이름을 바꿨습니다: ' + p[3] + ' ~ ' + p[4] + ' (' + p[2] + '개)');
       }
+      if (p[1] === 'fit') {
+        var fitText = '아트보드 ' + (p[2] === 'w' ? '너비' : '높이') + '에 맞췄습니다: 객체 ' + p[3] + '개';
+        if (parseInt(p[4], 10)) fitText += '\n크기가 0이라 건너뛴 객체 ' + p[4] + '개';
+        return setStatus(fitText);
+      }
+      if (p[1] === 'untrim') {
+        var untrimText = parseInt(p[2], 10) ? '트림을 해제했습니다: ' + p[2] + '개' : '해제할 트림이 없습니다.';
+        if (parseInt(p[3], 10)) untrimText += '\n잠겼거나 모양이 바뀐 트림 ' + p[3] + '개는 그대로 두었습니다.';
+        return setStatus(untrimText);
+      }
+      if (p[1] === 'emptylayers') {
+        var layerText = parseInt(p[2], 10) ? '빈 레이어 ' + p[2] + '개를 삭제했습니다.' : '빈 레이어가 없습니다.';
+        if (parseInt(p[3], 10)) layerText += '\n' + p[3] + '개는 지우지 못했습니다.';
+        return setStatus(layerText);
+      }
+      if (p[1] === 'opacity') {
+        var opacityText = parseInt(p[2], 10) ? '불투명도를 레이어 이름으로 옮겼습니다: 객체 ' + p[2] + '개 (새 레이어 ' + p[3] + '개)' :
+          '레이어에 바로 놓인 반투명 객체가 없습니다.';
+        if (parseInt(p[4], 10)) opacityText += '\n그룹 안의 반투명 객체 ' + p[4] + '개는 따로 뺄 수 없어 그대로 두었습니다.';
+        return setStatus(opacityText);
+      }
+      if (p[1] === 'flatten') {
+        var flattenText = parseInt(p[2], 10) ? '불투명도 대신 색으로 바꿨습니다: 객체 ' + p[2] + '개' : '바꾼 객체가 없습니다.';
+        if (parseInt(p[3], 10)) flattenText += '\n그라디언트 · 패턴 · 이미지 · 다른 합성 모드라 바꾸지 못한 객체 ' + p[3] + '개';
+        if (parseInt(p[4], 10)) flattenText += '\n' + p[4] + '개 실패';
+        return setStatus(flattenText);
+      }
       if (p[1] === 'trim') {
         var trimText = parseInt(p[2], 10) ? '아트보드 밖으로 나간 객체 ' + p[2] + '개를 아트보드 크기로 잘랐습니다.' :
           '아트보드 밖으로 나간 객체가 없습니다.';
@@ -577,6 +637,9 @@
       if (p[1] === 'nokey') return '키 오브젝트를 찾지 못했습니다. 여러 객체를 선택한 뒤 기준 객체를 한 번 더 클릭해 굵은 테두리로 만드세요.';
       if (p[1] === 'points') return '점을 정확히 두 개 선택하세요. (지금 ' + (p[2] === 'many' ? '3개 이상' : p[2] + '개') + ') 직접 선택 도구(A)를 쓰세요.';
       if (p[1] === 'samepoint') return '두 점이 같은 위치에 있습니다. 떨어진 두 점을 고르세요.';
+      if (p[1] === 'flatten') return '베이스 객체와 그 위의 반투명 객체를 함께 선택하세요. (2개 이상)';
+      if (p[1] === 'nobase') return '맨 아래 베이스 객체에 단색 칠이 없습니다. (RGB · CMYK · 회색 색상만 됩니다)';
+      if (p[1] === 'notransparent') return '베이스 위에 불투명도가 100%가 아닌 객체가 없습니다.';
       if (p[1] === 'canvas') return '아트보드가 캔버스 밖으로 나가서 정리하지 못했습니다. 간격을 줄이거나 열 수를 바꿔 보세요.';
       if (p[1] === 'exception') return '오류: ' + safeDecode(p[2]);
       return '알 수 없는 결과: ' + body;
@@ -652,6 +715,7 @@
     var NBSP = String.fromCharCode(0xA0);
     var IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
     var matrixSigns = {}; // per kind of object: 1 or -1, how its matrix reports rotation (see probeMatrixSign)
+    var TRIM_TAG = 'COC_Trim';
     try {
       if (app.documents.length === 0) return 'err|nodoc';
       var sel = app.activeDocument.selection;
@@ -668,6 +732,11 @@
         case 'arrange': return inDocumentCoordinates(function () { return arrange(req); });
         case 'rename': return renameBoards(req);
         case 'trim': return inDocumentCoordinates(trim);
+        case 'untrim': return untrim();
+        case 'fitboard': return inDocumentCoordinates(function () { return fitBoard(sel, req); });
+        case 'emptylayers': return removeEmptyLayers();
+        case 'opacitylayers': return opacityToLayers();
+        case 'flatten': return flattenOpacity(sel);
       }
       return 'err|exception|' + encodeURIComponent('unknown action ' + req.action);
     } catch (e) {
@@ -1713,6 +1782,88 @@
       return 'ok|trim|' + clipped + '|' + skipped + '|' + outside + '|' + failed;
     }
 
+    // Undo trim(): put each object back where its clipping group was and delete the group and its mask.
+    function untrim() {
+      var all = app.activeDocument.pageItems;
+      var groups = [];
+      var i;
+      for (i = 0; i < all.length; i++) {
+        if (all[i].typename === 'GroupItem' && hasTag(all[i], TRIM_TAG)) groups.push(all[i]);
+      }
+      var released = 0;
+      var skipped = 0;
+      for (i = groups.length - 1; i >= 0; i--) {
+        var group = groups[i];
+        var kids = [];
+        for (var k = 0; k < group.pageItems.length; k++) kids.push(group.pageItems[k]);
+        if (!group.editable || !kids.length || !isClippingPath(kids[0])) {
+          skipped++;
+          continue;
+        }
+        try {
+          for (k = 1; k < kids.length; k++) kids[k].move(group, ElementPlacement.PLACEBEFORE);
+          group.remove();
+          released++;
+        } catch (e) {
+          skipped++;
+        }
+      }
+      return 'ok|untrim|' + released + '|' + skipped;
+    }
+
+    function hasTag(item, name) {
+      try {
+        item.tags.getByName(name);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function isClippingPath(item) {
+      if (item.typename === 'PathItem') return item.clipping;
+      return item.typename === 'CompoundPathItem' && item.pathItems.length > 0 && item.pathItems[0].clipping;
+    }
+
+    // Scale each selected object to the width (or height) of the artboard it sits on (most overlap, else the
+    // active one) and line it up with that artboard's sides; the other direction keeps its centre.
+    function fitBoard(sel, o) {
+      var list = objects(sel);
+      if (list === null) return 'err|textedit';
+      if (!list.length) return 'err|few|1';
+      var boards = app.activeDocument.artboards;
+      var rects = [];
+      var i;
+      for (i = 0; i < boards.length; i++) {
+        var r = boards[i].artboardRect;
+        rects.push([r[0], r[1], r[2], r[3]]);
+      }
+      var active = boards.getActiveArtboardIndex();
+      var strokes = preference('scaleLineWeight', false);
+      var patterns = preference('transformPatterns', true);
+      var done = 0;
+      var skipped = 0;
+      for (i = 0; i < list.length; i++) {
+        var it = measure(list[i], i, o);
+        var wide = o.side === 'w';
+        if ((wide ? it.w : it.h) <= 0) {
+          skipped++; // a line cannot be stretched along its zero side
+          continue;
+        }
+        var owner = mostOverlap(it.b, rects);
+        var board = rects[owner < 0 ? active : owner];
+        var goal = { w: it.w, h: it.h };
+        var scale = wide ? (board[2] - board[0]) / it.w : (board[1] - board[3]) / it.h;
+        if (wide || o.keepRatio) goal.w = it.w * scale;
+        if (!wide || o.keepRatio) goal.h = it.h * scale;
+        resizeTo(it, goal, o, strokes, patterns);
+        if (wide) move(it.ref, board[0] - it.b[0], 0, patterns);
+        else move(it.ref, 0, board[1] - it.b[1], patterns);
+        done++;
+      }
+      return 'ok|fit|' + o.side + '|' + done + '|' + skipped;
+    }
+
     function touching(b, rects) {
       var out = [];
       for (var i = 0; i < rects.length; i++) {
@@ -1756,6 +1907,9 @@
 
     function clipTo(item, hits, rects) {
       var group = item.parent.groupItems.add();
+      var tag = group.tags.add(); // so that untrim() knows which clipping groups are ours
+      tag.name = TRIM_TAG;
+      tag.value = '1';
       group.move(item, ElementPlacement.PLACEBEFORE);
       var mask = hits.length === 1 ? group : group.compoundPathItems.add();
       for (var i = 0; i < hits.length; i++) {
@@ -1766,6 +1920,284 @@
       }
       item.move(group, ElementPlacement.PLACEATEND);
       group.clipped = true;
+    }
+
+    // ---- Layers and opacity -------------------------------------------------
+    // Remove layers with nothing in them (sublayers first). A document keeps at least one layer.
+    function removeEmptyLayers() {
+      var count = { removed: 0, failed: 0 };
+      pruneLayers(app.activeDocument.layers, true, count);
+      return 'ok|emptylayers|' + count.removed + '|' + count.failed;
+    }
+
+    function pruneLayers(layers, topLevel, count) {
+      for (var i = layers.length - 1; i >= 0; i--) {
+        var layer = layers[i];
+        var locked = layer.locked;
+        try {
+          if (locked) layer.locked = false; // a locked layer cannot lose sublayers or be removed
+          pruneLayers(layer.layers, false, count);
+          if (layer.pageItems.length === 0 && layer.layers.length === 0 && (!topLevel || app.activeDocument.layers.length > 1)) {
+            layer.remove();
+            count.removed++;
+            continue;
+          }
+        } catch (e) {
+          count.failed++;
+        }
+        try {
+          if (locked) layer.locked = true;
+        } catch (e2) { /* removed meanwhile */ }
+      }
+    }
+
+    // Give every see-through object (opacity under 100%) that sits directly in a layer a layer of its own named
+    // '<layer>_(opacity 60%)', and set it to 100%, so After Effects can take the opacity from the layer.
+    // Objects above and below it move into layers of their own so the stacking order stays the same.
+    function opacityToLayers() {
+      var doc = app.activeDocument;
+      var layers = [];
+      listLayers(doc.layers, layers); // before any new layer exists
+      var before = [];
+      var i;
+      for (i = 0; i < layers.length; i++) before.push({ locked: layers[i].locked, visible: layers[i].visible });
+      var result = { fixed: 0, created: 0, nested: 0 };
+      var made = [];
+      var state = { layers: [], items: [], locked: 0 };
+      try {
+        openUp(doc, state);
+        for (i = 0; i < layers.length; i++) splitByOpacity(layers[i], before[i], result, made);
+      } finally {
+        closeUp(state);
+      }
+      for (i = 0; i < made.length; i++) {
+        try {
+          made[i].layer.visible = made[i].from.visible; // new layers look like the layer they came from
+          made[i].layer.locked = made[i].from.locked;
+        } catch (e) { /* keep going */ }
+      }
+      var all = doc.pageItems;
+      for (i = 0; i < all.length; i++) {
+        if (seeThrough(all[i]) && all[i].parent.typename !== 'Layer') result.nested++;
+      }
+      return 'ok|opacity|' + result.fixed + '|' + result.created + '|' + result.nested;
+    }
+
+    function listLayers(layers, out) {
+      for (var i = 0; i < layers.length; i++) {
+        out.push(layers[i]);
+        listLayers(layers[i].layers, out);
+      }
+    }
+
+    function splitByOpacity(layer, from, result, made) {
+      var list = layer.pageItems;
+      var parts = []; // from the top: runs of ordinary objects, and each see-through object on its own
+      var run = null;
+      var i;
+      for (i = 0; i < list.length; i++) {
+        var item = list[i];
+        if (seeThrough(item)) {
+          parts.push({ items: [item], opacity: item.opacity });
+          run = null;
+        } else {
+          if (!run) {
+            run = { items: [], opacity: -1 };
+            parts.push(run);
+          }
+          run.items.push(item);
+        }
+      }
+      if (parts.length === 0 || (parts.length === 1 && parts[0].opacity < 0)) return;
+      var base = layer.name.replace(/_\(opacity [0-9.]+%\)$/, '');
+      var keepLast = layer.layers.length === 0; // with sublayers, every part moves out and the sublayers stay
+      for (i = 0; i < parts.length; i++) {
+        var part = parts[i];
+        var name = part.opacity < 0 ? base : base + '_(opacity ' + (Math.round(part.opacity * 10) / 10) + '%)';
+        if (i === parts.length - 1 && keepLast) {
+          layer.name = name;
+        } else {
+          var target = layer.parent.layers.add();
+          target.move(layer, ElementPlacement.PLACEBEFORE); // right above the layer, below earlier parts
+          target.name = name;
+          for (var k = 0; k < part.items.length; k++) part.items[k].move(target, ElementPlacement.PLACEATEND);
+          made.push({ layer: target, from: from });
+          result.created++;
+        }
+        if (part.opacity >= 0) {
+          part.items[0].opacity = 100;
+          result.fixed++;
+        }
+      }
+    }
+
+    function seeThrough(item) {
+      return item.opacity < 99.995;
+    }
+
+    // ---- Opacity turned into colour -----------------------------------------
+    // The lowest selected object is the base. Every see-through object above it gets the colour it shows over
+    // the base, at 100% opacity. Normal, Multiply and Screen; flat RGB, CMYK and grey colours.
+    function flattenOpacity(sel) {
+      var list = objects(sel);
+      if (list === null) return 'err|textedit';
+      if (list.length < 2) return 'err|flatten';
+      var base = baseColor(list[list.length - 1]);
+      if (!base) return 'err|nobase';
+      var done = 0;
+      var unsupported = 0;
+      var failed = 0;
+      for (var i = 0; i < list.length - 1; i++) {
+        var top = list[i];
+        if (!seeThrough(top)) continue;
+        var mode = blendName(top.blendingMode);
+        var paints = [];
+        var ready = mode && collectPaints(top, paints) ? mixAll(paints, base, top.opacity / 100, mode) : null;
+        if (!ready) {
+          unsupported++; // nothing is changed on this object
+          continue;
+        }
+        try {
+          for (var k = 0; k < paints.length; k++) paints[k].set(makeColor(ready[k]));
+          top.opacity = 100;
+          if (mode !== 'normal') top.blendingMode = BlendModes.NORMAL;
+          done++;
+        } catch (e) {
+          failed++;
+        }
+      }
+      if (!done && !unsupported && !failed) return 'err|notransparent';
+      return 'ok|flatten|' + done + '|' + unsupported + '|' + failed;
+    }
+
+    // Every paint mixed, or null if one of them cannot be.
+    function mixAll(paints, base, alpha, mode) {
+      var out = [];
+      for (var k = 0; k < paints.length; k++) {
+        var mixed = mixColor(paints[k].color, base, alpha, mode);
+        if (!mixed) return null;
+        out.push(mixed);
+      }
+      return out;
+    }
+
+    function blendName(mode) {
+      if (mode == BlendModes.NORMAL) return 'normal';
+      if (mode == BlendModes.MULTIPLY) return 'multiply';
+      if (mode == BlendModes.SCREEN) return 'screen';
+      return null;
+    }
+
+    // Fill and stroke paints of an object (inside groups and compound paths too); false if one cannot be mixed.
+    function collectPaints(item, out) {
+      var k;
+      if (item.typename === 'PathItem') {
+        if (item.filled && !addPaint(item, 'fillColor', out)) return false;
+        return !item.stroked || addPaint(item, 'strokeColor', out);
+      }
+      if (item.typename === 'CompoundPathItem' || item.typename === 'GroupItem') {
+        var kids = item.typename === 'GroupItem' ? item.pageItems : item.pathItems;
+        for (k = 0; k < kids.length; k++) {
+          if (!collectPaints(kids[k], out)) return false;
+        }
+        return true;
+      }
+      if (item.typename === 'TextFrame') {
+        var chars = item.textRange.characters;
+        for (k = 0; k < chars.length; k++) {
+          var attrs = chars[k].characterAttributes;
+          if (!addPaint(attrs, 'fillColor', out) || !addPaint(attrs, 'strokeColor', out)) return false;
+        }
+        return true;
+      }
+      return false; // images, symbols, meshes ...
+    }
+
+    function addPaint(owner, key, out) {
+      var color = owner[key];
+      if (color.typename === 'NoColor') return true;
+      var read = readColor(color);
+      if (!read) return false;
+      out.push({ color: read, set: function (c) { owner[key] = c; } });
+      return true;
+    }
+
+    // The base colour: its fill (for a group, the lowest filled shape in it).
+    function baseColor(item) {
+      if (item.typename === 'PathItem') return item.filled ? readColor(item.fillColor) : null;
+      if (item.typename === 'CompoundPathItem') return item.pathItems.length ? baseColor(item.pathItems[0]) : null;
+      if (item.typename === 'TextFrame') return readColor(item.textRange.characterAttributes.fillColor);
+      if (item.typename === 'GroupItem') {
+        for (var k = item.pageItems.length - 1; k >= 0; k--) {
+          var c = baseColor(item.pageItems[k]);
+          if (c) return c;
+        }
+      }
+      return null;
+    }
+
+    function readColor(c) {
+      if (c.typename === 'RGBColor') return { space: 'rgb', v: [c.red, c.green, c.blue] };
+      if (c.typename === 'CMYKColor') return { space: 'cmyk', v: [c.cyan, c.magenta, c.yellow, c.black] };
+      if (c.typename === 'GrayColor') return { space: 'gray', v: [c.gray] };
+      return null; // gradients, patterns, spot colours
+    }
+
+    // Mix in 'light' values (0 = no light / full ink, 1 = white) so RGB, CMYK and grey share one formula.
+    function mixColor(top, base, alpha, mode) {
+      var space = top.space === base.space ? top.space : (top.space === 'gray' ? base.space : (base.space === 'gray' ? top.space : null));
+      if (!space) return null; // RGB over CMYK: two colour modes
+      var t = toLight(top, space);
+      var b = toLight(base, space);
+      var out = [];
+      for (var k = 0; k < t.length; k++) {
+        var shown = mode === 'multiply' ? t[k] * b[k] : (mode === 'screen' ? 1 - (1 - t[k]) * (1 - b[k]) : t[k]);
+        out.push(alpha * shown + (1 - alpha) * b[k]);
+      }
+      return fromLight(out, space);
+    }
+
+    function toLight(color, space) {
+      var light = [];
+      var k;
+      if (color.space === 'rgb') {
+        for (k = 0; k < 3; k++) light.push(color.v[k] / 255);
+      } else if (color.space === 'cmyk') {
+        for (k = 0; k < 4; k++) light.push(1 - color.v[k] / 100);
+      } else {
+        var g = 1 - color.v[0] / 100;
+        light = space === 'rgb' ? [g, g, g] : (space === 'cmyk' ? [1, 1, 1, g] : [g]);
+      }
+      return light;
+    }
+
+    function fromLight(light, space) {
+      var v = [];
+      for (var k = 0; k < light.length; k++) {
+        var x = Math.max(0, Math.min(1, light[k]));
+        v.push(Math.round((space === 'rgb' ? x * 255 : (1 - x) * 100) * 1000) / 1000);
+      }
+      return { space: space, v: v };
+    }
+
+    function makeColor(c) {
+      var color;
+      if (c.space === 'rgb') {
+        color = new RGBColor();
+        color.red = c.v[0];
+        color.green = c.v[1];
+        color.blue = c.v[2];
+      } else if (c.space === 'cmyk') {
+        color = new CMYKColor();
+        color.cyan = c.v[0];
+        color.magenta = c.v[1];
+        color.yellow = c.v[2];
+        color.black = c.v[3];
+      } else {
+        color = new GrayColor();
+        color.gray = c.v[0];
+      }
+      return color;
     }
   }
 

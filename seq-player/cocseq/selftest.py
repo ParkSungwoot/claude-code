@@ -10,7 +10,8 @@ import traceback
 
 
 def run(out_path: str | None) -> int:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    if sys.platform != "win32":
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     lines: list[str] = []
     failed = False
 
@@ -165,7 +166,8 @@ def run(out_path: str | None) -> int:
     check("color (OpenColorIO)", color)
     check("movies + audio decode (PyAV/FFmpeg)", movie)
     check("audio output (PortAudio)", audio_out, required=False)
-    check("OpenGL shaders (software GL)", gl, required=False)
+    # On Windows the build must be able to draw with the bundled software OpenGL (opengl32sw.dll).
+    check("OpenGL shaders (software GL)", gl, required=sys.platform == "win32")
     check("fonts", fonts, required=False)
     from cocseq import __version__
 

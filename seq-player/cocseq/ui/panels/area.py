@@ -456,7 +456,12 @@ QWidget#AreaPanel[compact="true"] QLabel[area="rowkey"] {{ font-size: 10.5px; }}
     # ------------------------------------------------------------ public API
 
     def set_pixel(self, info: dict) -> None:
-        """Pixel under the cursor; {} when the cursor left the image (see module docs for keys)."""
+        """Pixel under the cursor, or {} when the cursor left the image.
+
+        Keys: ``x``, ``y`` (image pixel), ``raw`` (channel values or None outside the data
+        window), ``display`` (RGBA 0..1 after the view transform, or None), ``names``
+        (channel names of ``raw``) and ``source`` (the MediaSource).
+        """
         info = info or {}
         raw = info.get("raw")
         disp = info.get("display")
@@ -479,6 +484,8 @@ QWidget#AreaPanel[compact="true"] QLabel[area="rowkey"] {{ font-size: 10.5px; }}
         # raw values: merge into the RGBA grid when the channels are R, G, B(, A)
         if raw is not None and not names:
             names = ["R", "G", "B", "A"][:len(raw)] if len(raw) <= 4 else [f"C{i}" for i in range(len(raw))]
+        if not names and self._raw_names:
+            names = self._raw_names          # cursor left: keep the layout of the last layer (no jumping)
         shorts = [_short(n).upper() for n in names]
         merged = shorts == ["R", "G", "B", "A"][:len(shorts)] and len(shorts) >= 3 or not names
         if merged != self._merged or names != self._raw_names:

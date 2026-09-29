@@ -8,10 +8,11 @@ density plots are turned into QImages and drawn with a light graticule.
 from __future__ import annotations
 
 import math
+import time
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -157,12 +158,13 @@ def density_to_image(counts: np.ndarray, norm: float, color, gamma: float = 0.5,
     """
     h, w = counts.shape
     norm = max(float(norm), 1e-9)
-    top = int(min(int(counts.max()) if counts.size else 0, math.ceil(norm)))
+    cmax = int(counts.max()) if counts.size else 0
+    top = int(min(cmax, math.ceil(norm)))
     lut = np.minimum(np.arange(top + 1, dtype=np.float32) * np.float32(1.0 / norm), 1.0)
     lut = np.sqrt(lut) if gamma == 0.5 else lut ** np.float32(gamma)
     lut = np.maximum(lut, np.float32(floor))
     lut[0] = 0.0
-    idx = np.minimum(counts, top) if top < counts.max(initial=0) else counts
+    idx = np.minimum(counts, top) if top < cmax else counts
     col = np.asarray(color, np.float32)
     if col.ndim == 1:
         lut4 = np.empty((top + 1, 4), np.float32)
@@ -239,8 +241,6 @@ class _Legend(QWidget):
         self.setFixedHeight(22)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._font = ui_font(8.5, QFont.DemiBold)
-        from PySide6.QtGui import QFontMetricsF
-
         fm = QFontMetricsF(self._font)
         self._w = [10 + fm.horizontalAdvance(t) for t, _c in entries]
         self.setFixedWidth(int(sum(self._w) + 10 * (len(entries) - 1)) + 2)
@@ -487,9 +487,7 @@ class _ScopeView(QWidget):
                 pen.setDashPattern([2, 3])
                 p.setPen(pen)
             p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
-            if ire % 20 == 0 or ire == 50:
-                if ire == 50:
-                    continue
+            if ire % 20 == 0:
                 p.setPen(PAL.qcolor("text3"))
                 p.drawText(QRectF(plot.left() - 34, y - 7, 28, 14), Qt.AlignRight | Qt.AlignVCenter, str(ire))
 
@@ -590,7 +588,7 @@ class _ScopeView(QWidget):
             p.setPen(pen)
             p.drawLine(c, QPointF(c.x() + math.cos(a) * R, c.y() - math.sin(a) * R))
 
-        # 75 % targets (boxes) and 100 % ticks
+        # 75 % targets (boxes) and 100 % targets (dots)
         p.setFont(mono_font(7.5, QFont.Medium))
         for label, rgb in _TARGETS:
             cb75, cr75 = _target_cbcr(rgb, 0.75)
@@ -640,6 +638,7 @@ class ScopesPanel(QWidget):
     activeChanged = Signal(bool)
 
     MODES = ("hist", "wave", "vector")
+    STATS_INTERVAL = 0.12      # seconds between stats-row refreshes while frames stream in
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -656,6 +655,10 @@ class ScopesPanel(QWidget):
         self._rgb: np.ndarray | None = None
         self._y: np.ndarray | None = None
         self._derived: dict = {}
+        self._stats_at = 0.0
+        self._stats_timer = QTimer(self)
+        self._stats_timer.setSingleShot(True)
+        self._stats_timer.timeout.connect(self._refresh_stats)
 
         self.setStyleSheet(
             f'QLabel[scope="statlabel"] {{ color: {PAL.text3}; font-size: 11px; }}'
@@ -796,7 +799,14 @@ class ScopesPanel(QWidget):
         self._y = luma(rgb) if rgb is not None else None
         self._derived = {}
         self.view.invalidate()
-        self._refresh_stats()
+        # During playback the numbers would flicker unreadably: refresh them at most ~8x a second.
+        now = time.monotonic()
+        wait = self.STATS_INTERVAL - (now - self._stats_at)
+        if rgb is None or wait <= 0:
+            self._stats_timer.stop()
+            self._refresh_stats()
+        elif not self._stats_timer.isActive():
+            self._stats_timer.start(max(1, int(wait * 1000)))
 
     def _data(self, what: str):
         """Derived data of the current image, computed on first use: 'hist', 'cbcr' or a stats kind."""
@@ -852,6 +862,7 @@ class ScopesPanel(QWidget):
                 "cb": mcb, "cr": mcr, "hue": hue, "out": out_of_range}
 
     def _refresh_stats(self) -> None:
+        self._stats_at = time.monotonic()
         has = self._rgb is not None
         self.stats_title.setVisible(has)
         self.stats.setVisible(has)

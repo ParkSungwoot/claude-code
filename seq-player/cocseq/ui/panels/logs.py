@@ -131,7 +131,8 @@ def install_log_handler() -> None:
     root = logging.getLogger()
     if _handler not in root.handlers:
         root.addHandler(_handler)
-    root.setLevel(logging.INFO)
+        # Only on first install, so a level chosen later by the app (e.g. DEBUG) is kept.
+        root.setLevel(logging.INFO)
     logging.captureWarnings(True)
 
 

@@ -198,6 +198,7 @@ class MediaInfoPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("MediaInfoPanel")
         self._source = None
+        self._sig: tuple = ()
         self._info = None
         self._frame = None
         self._sections: list[tuple[str, list[tuple[str, str]]]] = []
@@ -257,15 +258,27 @@ QTreeWidget#MetaTree::item:selected {{ background: {P.rgba(P.accent, 0.16)}; col
 
     def set_source(self, source, frame=None) -> None:
         """Show ``source`` (a MediaSource, or None for the empty state); ``frame`` adds per-frame details."""
-        if (source is not None and source is self._source and getattr(source, "info", None) is self._info
-                and self._content is not None):
+        sig = self._signature(source)
+        if source is not None and sig == self._sig and self._content is not None:
+            # same clip and settings: only the per-frame rows change (cheap enough for playback)
             self._frame = frame
             self._update_frame_rows()
             return
+        same_clip = source is not None and source is self._source
         self._source = source
+        self._sig = sig
         self._info = getattr(source, "info", None) if source is not None else None
         self._frame = frame
-        self._rebuild()
+        self._rebuild(keep_scroll=same_clip)
+
+    @staticmethod
+    def _signature(source) -> tuple:
+        if source is None:
+            return ()
+        layer = getattr(source, "layer", None)
+        return (id(source), id(getattr(source, "info", None)), getattr(layer, "key", ""),
+                getattr(source, "fps_override", 0.0), getattr(source, "in_point", None),
+                getattr(source, "out_point", None), getattr(source, "error", ""))
 
     def text(self) -> str:
         """Everything shown in the panel as plain text (what the copy button puts on the clipboard)."""
@@ -286,9 +299,9 @@ QTreeWidget#MetaTree::item:selected {{ background: {P.rgba(P.accent, 0.16)}; col
 
     # ------------------------------------------------------------ build
 
-    def _rebuild(self) -> None:
+    def _rebuild(self, keep_scroll: bool = False) -> None:
         bar = self.scroll.verticalScrollBar()
-        keep = bar.value()
+        keep = bar.value() if keep_scroll else 0
         self._sections = []
         self._frame_labels = {}
         self._meta_items = []
@@ -307,7 +320,14 @@ QTreeWidget#MetaTree::item:selected {{ background: {P.rgba(P.accent, 0.16)}; col
             old.deleteLater()
         self.scroll.setWidget(content)
         self._content = content
-        QTimer.singleShot(0, lambda: bar.setValue(keep))
+
+        def restore_scroll():
+            try:
+                bar.setValue(keep)
+            except RuntimeError:     # panel already destroyed
+                pass
+
+        QTimer.singleShot(0, restore_scroll)
 
     def _build_empty(self, lay: QVBoxLayout) -> None:
         from cocseq import icons

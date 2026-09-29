@@ -47,11 +47,8 @@ jobs:
           Get-Content $out
           if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
 
-      - name: Zip
-        run: Compress-Archive -Path "dist\COC_SEQ Player" -DestinationPath "dist\COC_SEQ_Player_win64.zip"
-
       - uses: actions/upload-artifact@v4
         with:
           name: COC_SEQ_Player_win64
-          path: seq-player/dist/COC_SEQ_Player_win64.zip
+          path: seq-player/dist/COC_SEQ Player/
           retention-days: 30

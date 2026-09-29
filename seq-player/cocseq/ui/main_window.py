@@ -1636,8 +1636,12 @@ class MainWindow(QMainWindow):
         self.viewer.display_changed()
         self._update_hud()
 
-    def _fill_display_combos(self) -> None:
+    def _fill_display_combos(self, force: bool = False) -> None:
         d = self.viewer.display
+        key = (self.colors.uri, d.display, d.view)
+        if not force and key == getattr(self, "_display_combo_key", None):
+            return
+        self._display_combo_key = key
         self.display_combo.blockSignals(True)
         self.display_combo.clear()
         self.display_combo.addItems(self.colors.displays())

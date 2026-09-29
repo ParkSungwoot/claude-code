@@ -140,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     QSurfaceFormat.setDefaultFormat(fmt)
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     if software_gl:
+        from cocseq.viewer.glsetup import use_software_gl
+
+        use_software_gl()
         QCoreApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
     elif sys.platform == "win32":
         QCoreApplication.setAttribute(Qt.AA_UseDesktopOpenGL)

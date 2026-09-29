@@ -37,6 +37,9 @@ def run(out_path: str | None) -> int:
     QSurfaceFormat.setDefaultFormat(fmt)
     if QApplication.instance() is None:
         if sys.platform == "win32":
+            from cocseq.viewer.glsetup import use_software_gl
+
+            lines.append(f"INFO  software OpenGL DLL: {use_software_gl()}")
             QCoreApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
         app = QApplication(["selftest"])
     else:
@@ -151,9 +154,10 @@ def run(out_path: str | None) -> int:
         cm.load("ocio://studio-config-latest", prefer_env=False)
         pipe = cm.pipeline("ACEScg", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)")
         gl_viewer._link(VERTEX, color_program_source(pipe.to_lin.text, pipe.to_disp.text))
-        ver = GL.glGetString(GL.GL_VERSION)
+        ver = (GL.glGetString(GL.GL_VERSION) or b"").decode(errors="replace")
+        ren = (GL.glGetString(GL.GL_RENDERER) or b"").decode(errors="replace")
         ctx.doneCurrent()
-        return (ver or b"").decode(errors="replace")
+        return f"{ren} / {ver}"
 
     def fonts():
         from PySide6.QtGui import QFontDatabase

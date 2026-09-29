@@ -331,6 +331,8 @@ class ThumbnailService(QObject):
         self._thread.start()
 
     def set_display_fn(self, source_id: int, fn: Callable | None) -> None:
+        if self._display_fns.get(source_id) is fn:
+            return
         self._display_fns[source_id] = fn
         with self._cond:
             for k in [k for k in self._done if k[0] == source_id]:

@@ -75,21 +75,28 @@ def _window(win) -> str:
 
 
 class _ElideLabel(QLabel):
-    """Single-line label that elides to its width; the full text is in the tooltip."""
+    """Single-line label that elides to its width; when cut, the full text is in the tooltip."""
 
     def __init__(self, text: str = "", mode=Qt.ElideMiddle, parent=None):
         super().__init__(parent)
         self._full = ""
         self._mode = mode
+        self._tip = ""
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.setMinimumWidth(30)
+        self.setMinimumWidth(24)
         self.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.set_full_text(text)
 
     def set_full_text(self, text: str) -> None:
         self._full = text
-        self.setToolTip(text)
         self._elide()
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt naming
+        self.set_full_text(text)
+
+    def setToolTip(self, tip: str) -> None:  # noqa: N802
+        self._tip = tip
+        super().setToolTip(tip)
 
     def full_text(self) -> str:
         return self._full
@@ -100,9 +107,11 @@ class _ElideLabel(QLabel):
 
     def _elide(self) -> None:
         w = self.width() - 2
-        text = self.fontMetrics().elidedText(self._full, self._mode, max(10, w)) if w > 10 else self._full
+        text = self.fontMetrics().elidedText(self._full, self._mode, w) if w > 10 else self._full
         if text != self.text():
             super().setText(text)
+        if not self._tip:
+            super().setToolTip(self._full if text != self._full else "")
 
 
 class _MetaTree(QTreeWidget):
@@ -288,7 +297,7 @@ QTreeWidget#MetaTree::item:selected {{ background: {P.rgba(P.accent, 0.16)}; col
             lines.extend(f"{k}: {v}" for k, v in rows)
             if title == "재생" and self._frame is not None and "cur" in self._frame_labels:
                 cur = self._frame_labels["cur"]
-                sub = cur.sub_label.text() if cur.sub_label is not None else ""
+                sub = cur.sub_label.full_text() if cur.sub_label is not None else ""
                 lines.append(f"현재 프레임: {cur.text()}" + (f" ({sub})" if sub else ""))
             lines.append("")
         meta = self._info.metadata if self._info is not None else {}
@@ -372,14 +381,17 @@ QTreeWidget#MetaTree::item:selected {{ background: {P.rgba(P.accent, 0.16)}; col
         k.setFixedWidth(KEY_WIDTH)
         k.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         h.addWidget(k, 0, Qt.AlignTop)
-        if elide:
-            v = _ElideLabel(value, Qt.ElideMiddle, w)
-        else:
+        if wrap:
             v = QLabel(value, w)
             v.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            v.setWordWrap(wrap)
-            if wrap:
-                v.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            v.setWordWrap(True)
+            v.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        elif sub:
+            v = QLabel(value, w)             # natural width; the note next to it elides
+            v.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            v.setMinimumWidth(1)
+        else:
+            v = _ElideLabel(value, Qt.ElideMiddle if elide else Qt.ElideRight, w)
         v.setProperty("info", state or ("mono" if mono else "value"))
         if tooltip:
             v.setToolTip(tooltip)
@@ -389,11 +401,10 @@ QTreeWidget#MetaTree::item:selected {{ background: {P.rgba(P.accent, 0.16)}; col
             box.setContentsMargins(0, 0, 0, 0)
             box.setSpacing(6)
             box.addWidget(v)
-            s = QLabel(sub.strip(), w)
+            s = _ElideLabel(sub.strip(), Qt.ElideRight, w)
             s.setProperty("info", "sub")
-            box.addWidget(s)
+            box.addWidget(s, 1)
             v.sub_label = s
-            box.addStretch(1)
             h.addLayout(box, 1)
         else:
             h.addWidget(v, 1)

@@ -28,7 +28,6 @@ ACTIONS: list[ActionDef] = [
     ActionDef("file.save_session", "세션 저장", "파일", "Ctrl+S", "save"),
     ActionDef("file.save_session_as", "세션을 다른 이름으로 저장…", "파일", "Ctrl+Alt+S", "save"),
     ActionDef("file.save_frame", "현재 프레임 저장…", "파일", "Ctrl+Shift+S", "camera"),
-    ActionDef("file.export", "동영상/시퀀스로 내보내기…", "파일", "Ctrl+E", "export"),
     ActionDef("file.export_pdf", "주석을 PDF로 내보내기…", "파일", "", "pdf"),
     ActionDef("file.reload", "다시 불러오기 (디스크 새로고침)", "파일", "F5", "refresh"),
     ActionDef("file.close", "현재 클립 닫기", "파일", "Ctrl+W", "close"),
@@ -118,7 +117,7 @@ ACTIONS: list[ActionDef] = [
     ActionDef("color.exposure_reset", "노출 초기화", "색", "\\"),
     ActionDef("color.gamma_up", "감마 올리기", "색", "}"),
     ActionDef("color.gamma_down", "감마 내리기", "색", "{"),
-    ActionDef("color.reset", "색 조정 모두 초기화", "색", "Ctrl+\\"),
+    ActionDef("color.reset", "노출·감마·채널 초기화", "색", "Ctrl+\\"),
 
     # Annotation
     ActionDef("draw.none", "선택/이동 도구", "주석", "V", "hand"),
@@ -139,7 +138,7 @@ ACTIONS: list[ActionDef] = [
 
     # Panels / windows
     ActionDef("panel.playlist", "플레이리스트", "패널", "Alt+1", "playlist"),
-    ActionDef("panel.color", "색 보정", "패널", "Alt+2", "palette"),
+    ActionDef("panel.color", "컬러 관리", "패널", "Alt+2", "palette"),
     ActionDef("panel.compare", "비교", "패널", "Alt+3", "compare"),
     ActionDef("panel.annotate", "주석", "패널", "Alt+4", "pen"),
     ActionDef("panel.info", "미디어 정보", "패널", "Alt+5", "info"),

@@ -6,7 +6,7 @@ import pytest
 
 SKIP = {
     "file.open", "file.open_folder", "file.open_audio", "file.open_session", "file.save_session",
-    "file.save_session_as", "file.save_frame", "file.export", "file.export_pdf", "file.reveal", "file.quit",
+    "file.save_session_as", "file.save_frame", "file.export_pdf", "file.reveal", "file.quit",
     "file.close", "file.close_all", "play.goto", "app.preferences", "app.hotkeys", "app.about", "view.on_top",
 }
 

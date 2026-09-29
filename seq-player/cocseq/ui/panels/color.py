@@ -1,4 +1,4 @@
-"""Color panel: OCIO input/display/view/look, LUT, exposure, grading, levels and alpha."""
+"""Color management panel: OCIO input/display/view/look, LUT, exposure/gamma and alpha."""
 
 from __future__ import annotations
 
@@ -98,17 +98,8 @@ class ColorPanel(QWidget):
         lay.addWidget(card)
 
         # --- Exposure
-        lay.addWidget(SectionTitle("노출 · 감마"))
-        card = Card()
-        self.exposure = ScrubField("노출", 0.0, -12, 12, 0.02, 2, 0.0, icon="sun", suffix=" st", width=150)
-        self.gamma = ScrubField("감마", 1.0, 0.1, 4.0, 0.005, 2, 1.0, icon="gamma", width=150)
-        for w in (self.exposure, self.gamma):
-            card.lay.addWidget(w)
-        lay.addWidget(card)
-
-        # --- Grade
         head = QHBoxLayout()
-        head.addWidget(SectionTitle("색 보정"))
+        head.addWidget(SectionTitle("노출 · 감마"))
         head.addStretch(1)
         b_reset = QPushButton("초기화")
         b_reset.setProperty("variant", "ghost")
@@ -116,30 +107,9 @@ class ColorPanel(QWidget):
         head.addWidget(b_reset)
         lay.addLayout(head)
         card = Card()
-        self.offset = ScrubField("더하기 (Offset)", 0.0, -1, 1, 0.002, 3, 0.0, width=150)
-        self.contrast = ScrubField("대비", 1.0, 0.0, 4.0, 0.005, 2, 1.0, width=150)
-        self.saturation = ScrubField("채도", 1.0, 0.0, 4.0, 0.005, 2, 1.0, width=150)
-        self.hue = ScrubField("색조 회전", 0.0, -180, 180, 0.5, 1, 0.0, suffix="°", width=150)
-        self.softclip = ScrubField("소프트 클립", 0.0, 0.0, 0.99, 0.002, 2, 0.0, width=150)
-        for w in (self.offset, self.contrast, self.saturation, self.hue, self.softclip):
-            card.lay.addWidget(w)
-        self.invert = QCheckBox("색 반전")
-        self.invert.toggled.connect(self._edited)
-        card.lay.addWidget(self.invert)
-        lay.addWidget(card)
-
-        # --- Levels
-        lay.addWidget(SectionTitle("레벨"))
-        card = Card()
-        self.levels_on = QCheckBox("레벨 사용")
-        self.levels_on.toggled.connect(self._edited)
-        card.lay.addWidget(self.levels_on)
-        self.in_lo = ScrubField("입력 최소", 0.0, -1, 2, 0.002, 3, 0.0, width=150)
-        self.in_hi = ScrubField("입력 최대", 1.0, -1, 4, 0.002, 3, 1.0, width=150)
-        self.lv_gamma = ScrubField("감마", 1.0, 0.1, 4, 0.005, 2, 1.0, width=150)
-        self.out_lo = ScrubField("출력 최소", 0.0, 0, 1, 0.002, 3, 0.0, width=150)
-        self.out_hi = ScrubField("출력 최대", 1.0, 0, 1, 0.002, 3, 1.0, width=150)
-        for w in (self.in_lo, self.in_hi, self.lv_gamma, self.out_lo, self.out_hi):
+        self.exposure = ScrubField("노출", 0.0, -12, 12, 0.02, 2, 0.0, icon="sun", suffix=" st", width=150)
+        self.gamma = ScrubField("감마", 1.0, 0.1, 4.0, 0.005, 2, 1.0, icon="gamma", width=150)
+        for w in (self.exposure, self.gamma):
             card.lay.addWidget(w)
         lay.addWidget(card)
 
@@ -158,8 +128,7 @@ class ColorPanel(QWidget):
         lay.addWidget(card)
         lay.addStretch(1)
 
-        for w in (self.exposure, self.gamma, self.offset, self.contrast, self.saturation, self.hue, self.softclip,
-                  self.in_lo, self.in_hi, self.lv_gamma, self.out_lo, self.out_hi):
+        for w in (self.exposure, self.gamma):
             w.valueChanged.connect(self._edited)
 
     # ---------------------------------------------------------------- sync
@@ -195,18 +164,6 @@ class ColorPanel(QWidget):
         self.lut_mode.setEnabled(bool(d.lut))
         self.exposure.setValue(d.exposure)
         self.gamma.setValue(d.gamma)
-        self.offset.setValue(d.offset)
-        self.contrast.setValue(d.contrast)
-        self.saturation.setValue(d.saturation)
-        self.hue.setValue(d.hue)
-        self.softclip.setValue(d.softclip)
-        self.invert.setChecked(d.invert)
-        self.levels_on.setChecked(d.levels)
-        self.in_lo.setValue(d.in_lo)
-        self.in_hi.setValue(d.in_hi)
-        self.lv_gamma.setValue(d.lv_gamma)
-        self.out_lo.setValue(d.out_lo)
-        self.out_hi.setValue(d.out_hi)
         self.alpha.set_value(d.alpha_mode)
         self.unpremult.setChecked(d.unpremult)
         self.video.set_value(d.video_levels)
@@ -225,18 +182,6 @@ class ColorPanel(QWidget):
         d = self.display
         d.exposure = self.exposure.value()
         d.gamma = self.gamma.value()
-        d.offset = self.offset.value()
-        d.contrast = self.contrast.value()
-        d.saturation = self.saturation.value()
-        d.hue = self.hue.value()
-        d.softclip = self.softclip.value()
-        d.invert = self.invert.isChecked()
-        d.levels = self.levels_on.isChecked()
-        d.in_lo = self.in_lo.value()
-        d.in_hi = self.in_hi.value()
-        d.lv_gamma = self.lv_gamma.value()
-        d.out_lo = self.out_lo.value()
-        d.out_hi = self.out_hi.value()
         d.alpha_mode = self.alpha.value()
         d.unpremult = self.unpremult.isChecked()
         d.video_levels = self.video.value()
@@ -245,13 +190,6 @@ class ColorPanel(QWidget):
     def _reset(self) -> None:
         self.display.reset_grade()
         self.refresh_values()
-        self._updating = True
-        for w in (self.offset, self.contrast, self.saturation, self.hue, self.softclip, self.in_lo, self.in_hi,
-                  self.lv_gamma, self.out_lo, self.out_hi):
-            w.setValue(w.default)
-        self.invert.setChecked(False)
-        self.levels_on.setChecked(False)
-        self._updating = False
         self.changed.emit()
 
     def _cs_chosen(self, index: int) -> None:

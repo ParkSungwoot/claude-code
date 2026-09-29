@@ -44,18 +44,6 @@ class DisplaySettings:
 
     exposure: float = 0.0
     gamma: float = 1.0
-    offset: float = 0.0
-    contrast: float = 1.0
-    saturation: float = 1.0
-    hue: float = 0.0
-    softclip: float = 0.0
-    invert: bool = False
-    levels: bool = False
-    in_lo: float = 0.0
-    in_hi: float = 1.0
-    lv_gamma: float = 1.0
-    out_lo: float = 0.0
-    out_hi: float = 1.0
     channel: str = "rgb"
     video_levels: str = "auto"      # auto | legal
     unpremult: bool = False
@@ -70,9 +58,9 @@ class DisplaySettings:
         return tuple(getattr(self, f.name) for f in fields(self))
 
     def reset_grade(self) -> None:
-        for f in ("exposure", "gamma", "offset", "contrast", "saturation", "hue", "softclip", "invert",
-                  "levels", "in_lo", "in_hi", "lv_gamma", "out_lo", "out_hi"):
-            setattr(self, f, DisplaySettings.__dataclass_fields__[f].default)
+        """Back to exposure 0 and gamma 1."""
+        self.exposure = 0.0
+        self.gamma = 1.0
 
     def to_dict(self) -> dict:
         return {f.name: getattr(self, f.name) for f in fields(self)}
@@ -119,22 +107,6 @@ class _Program:
     uniforms: dict = field(default_factory=dict)
     textures: list = field(default_factory=list)   # (unit, target, tex_id, sampler)
     error: str = ""
-
-
-def _hue_matrix(degrees: float) -> np.ndarray:
-    """Rotation of colors around the grey axis."""
-    if abs(degrees) < 1e-6:
-        return np.eye(3, dtype=np.float32)
-    a = math.radians(degrees)
-    c, s = math.cos(a), math.sin(a)
-    k = 1.0 / 3.0
-    sq = math.sqrt(k)
-    m = np.array([
-        [c + (1 - c) * k, k * (1 - c) - sq * s, k * (1 - c) + sq * s],
-        [k * (1 - c) + sq * s, c + k * (1 - c), k * (1 - c) - sq * s],
-        [k * (1 - c) - sq * s, k * (1 - c) + sq * s, c + k * (1 - c)],
-    ], dtype=np.float32)
-    return m
 
 
 def _compile(kind, src: str) -> int:
@@ -698,19 +670,7 @@ class ViewerWidget(QOpenGLWidget):
         GL.glUniform1i(u("u_video_levels"), 1 if d.video_levels == "legal" else 0)
         GL.glUniform1i(u("u_unpremult"), 1 if d.unpremult else 0)
         GL.glUniform1f(u("u_gain"), 2.0 ** d.exposure)
-        GL.glUniform1f(u("u_offset"), d.offset)
-        GL.glUniform1f(u("u_contrast"), d.contrast)
-        GL.glUniform1f(u("u_saturation"), d.saturation)
-        GL.glUniformMatrix3fv(u("u_hue"), 1, GL.GL_TRUE, _hue_matrix(d.hue))
-        GL.glUniform1f(u("u_softclip"), max(0.0, min(0.99, d.softclip)))
         GL.glUniform1f(u("u_gamma"), max(0.01, d.gamma))
-        GL.glUniform1i(u("u_levels"), 1 if d.levels else 0)
-        GL.glUniform1f(u("u_in_lo"), d.in_lo)
-        GL.glUniform1f(u("u_in_hi"), d.in_hi)
-        GL.glUniform1f(u("u_lv_gamma"), d.lv_gamma)
-        GL.glUniform1f(u("u_out_lo"), d.out_lo)
-        GL.glUniform1f(u("u_out_hi"), d.out_hi)
-        GL.glUniform1i(u("u_invert"), 1 if d.invert else 0)
 
     def _render_color(self, gs: _GLSlot, source, frame: Frame, force: bool = False) -> bool:
         """Pass 1 for one clip. Returns True when the slot texture holds a valid image."""

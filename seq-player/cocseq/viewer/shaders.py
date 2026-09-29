@@ -1,7 +1,7 @@
 """GLSL sources for the two render passes.
 
-Pass 1 (per clip): source pixels -> input color space -> scene linear -> grading ->
-display transform -> display grading, rendered at image resolution into a float texture.
+Pass 1 (per clip): source pixels -> input color space -> scene linear -> exposure ->
+display transform -> gamma, rendered at image resolution into a float texture.
 Pass 2 (per widget): place the pass-1 textures on screen (zoom, compare modes,
 environment maps) over the background.
 """
@@ -25,19 +25,7 @@ uniform int u_channel;       // 0 rgb, 1 r, 2 g, 3 b, 4 alpha, 5 luminance
 uniform int u_video_levels;  // 1: expand legal range
 uniform int u_unpremult;
 uniform float u_gain;
-uniform float u_offset;
-uniform float u_contrast;
-uniform float u_saturation;
-uniform mat3 u_hue;
-uniform float u_softclip;
 uniform float u_gamma;
-uniform int u_levels;
-uniform float u_in_lo;
-uniform float u_in_hi;
-uniform float u_lv_gamma;
-uniform float u_out_lo;
-uniform float u_out_hi;
-uniform int u_invert;
 
 //__OCIO_LIN__
 
@@ -57,15 +45,7 @@ void main() {
     if (u_unpremult == 1 && a > 1e-6) rgb /= a;
 
     vec3 lin = ocio_lin(vec4(rgb, 1.0)).rgb;
-    lin = lin * u_gain + vec3(u_offset);
-    if (u_contrast != 1.0) lin = sign(lin) * 0.18 * pow(abs(lin) / 0.18, vec3(u_contrast));
-    if (u_saturation != 1.0) lin = mix(vec3(luma(lin)), lin, u_saturation);
-    lin = u_hue * lin;
-    if (u_softclip > 0.0) {
-        float t = 1.0 - u_softclip;
-        vec3 over = max(lin - vec3(t), vec3(0.0));
-        lin = min(lin, vec3(t)) + u_softclip * (vec3(1.0) - exp(-over / u_softclip));
-    }
+    lin = lin * u_gain;
     if (u_channel == 1) lin = vec3(lin.r);
     else if (u_channel == 2) lin = vec3(lin.g);
     else if (u_channel == 3) lin = vec3(lin.b);
@@ -73,12 +53,6 @@ void main() {
 
     vec3 d = ocio_disp(vec4(lin, 1.0)).rgb;
     if (u_gamma != 1.0) d = sign(d) * pow(abs(d), vec3(1.0 / u_gamma));
-    if (u_levels == 1) {
-        d = clamp((d - vec3(u_in_lo)) / max(u_in_hi - u_in_lo, 1e-5), 0.0, 1.0);
-        d = pow(d, vec3(1.0 / max(u_lv_gamma, 1e-3)));
-        d = mix(vec3(u_out_lo), vec3(u_out_hi), d);
-    }
-    if (u_invert == 1) d = vec3(1.0) - d;
     if (u_unpremult == 1) d *= a;
     fragColor = vec4(d, a);
 }

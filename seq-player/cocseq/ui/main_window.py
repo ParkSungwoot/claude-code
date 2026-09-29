@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 
 PANELS = [
     ("playlist", "플레이리스트", "playlist"),
-    ("color", "색 보정", "palette"),
+    ("color", "컬러 관리", "palette"),
     ("compare", "비교", "compare"),
     ("annotate", "주석", "pen"),
     ("info", "미디어 정보", "info"),
@@ -520,7 +520,6 @@ class MainWindow(QMainWindow):
             "file.save_session": self.save_session,
             "file.save_session_as": self.save_session_as,
             "file.save_frame": self.save_frame,
-            "file.export": self.export_dialog,
             "file.export_pdf": self.export_pdf,
             "file.reload": lambda: self.reload_source(self.a),
             "file.close": lambda: self.close_source(self.a),
@@ -649,7 +648,7 @@ class MainWindow(QMainWindow):
         self.recent_session_menu = m.addMenu("최근 세션")
         self.recent_session_menu.aboutToShow.connect(self._fill_recent_sessions)
         m.addSeparator()
-        for aid in ("file.save_frame", "file.export", "file.export_pdf"):
+        for aid in ("file.save_frame", "file.export_pdf"):
             m.addAction(A(aid))
         m.addSeparator()
         for aid in ("file.reload", "file.reveal", "file.copy_path"):
@@ -2201,20 +2200,6 @@ class MainWindow(QMainWindow):
             return
         AboutDialog(gl_info=self.gl_info, parent=self).exec()
 
-    def export_dialog(self) -> None:
-        if self.a is None:
-            return
-        self.playback.stop()
-        try:
-            from cocseq.export import export_with_progress
-            from cocseq.ui.dialogs.export_dialog import ExportDialog
-        except Exception as exc:
-            QMessageBox.warning(self, APP_NAME, f"내보내기를 사용할 수 없습니다: {exc}")
-            return
-        dlg = ExportDialog(self.a, self.viewer, self.playback.frame, self)
-        if dlg.exec():
-            export_with_progress(self, dlg.settings(), self.a, self.viewer)
-
     def save_frame(self) -> None:
         if self.a is None or not self.viewer.slots or self.viewer.slots[0].frame is None:
             return
@@ -2276,7 +2261,7 @@ class MainWindow(QMainWindow):
         for key, label in BACKGROUNDS:
             bg.addAction(self.bg_actions[key])
         m.addSeparator()
-        for aid in ("file.save_frame", "file.export", "file.reveal", "file.copy_path"):
+        for aid in ("file.save_frame", "file.reveal", "file.copy_path"):
             m.addAction(A(aid))
         m.addSeparator()
         m.addAction(A("view.presentation"))

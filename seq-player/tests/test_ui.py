@@ -119,3 +119,38 @@ def test_open_folder_scans_everything(window, qapp, media):
     win, _errors = window
     win.open_paths([os.path.join(media["root"], "png")])
     assert len(win.sources) == 1 and win.a.length == 30
+
+
+def test_preferences_apply(window, qapp, media, monkeypatch):
+    import copy
+
+    from cocseq.ui.dialogs import hotkeys_dialog, prefs_dialog
+
+    win, errors = window
+    win.open_paths([media["exr"]])
+    new = copy.deepcopy(win.prefs)
+    new.accent = "#4C8DFF"
+    new.cache_gb = 1.5
+    new.ocio_config = "ocio://cg-config-latest"
+    new.ocio_prefer_env = False
+    new.background = "checker"
+    new.time_display = "timecode"
+    monkeypatch.setattr(prefs_dialog.PreferencesDialog, "exec", lambda self: 1)
+    monkeypatch.setattr(prefs_dialog.PreferencesDialog, "result_prefs", lambda self: copy.deepcopy(new))
+    win.show_preferences()
+    pump(qapp, 0.2)
+    assert win.cache.budget == int(1.5 * 1024 ** 3)
+    assert win.colors.uri == "ocio://cg-config-latest"
+    assert win.viewer.background == "checker"
+    assert win.timeline.time_mode == "timecode"
+    from cocseq.theme import PAL
+
+    assert PAL.accent.lower() == "#4c8dff"
+    monkeypatch.setattr(hotkeys_dialog.HotkeysDialog, "exec", lambda self: 1)
+    monkeypatch.setattr(hotkeys_dialog.HotkeysDialog, "result_overrides", lambda self: {"view.fit": "Ctrl+Alt+F"})
+    win.show_hotkeys()
+    assert win.actions_by_id["view.fit"].shortcut().toString() == "Ctrl+Alt+F"
+    assert not errors, errors[0]
+    from cocseq import theme
+
+    theme.set_accent("#FF7A45")

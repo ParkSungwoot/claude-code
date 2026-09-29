@@ -3,7 +3,7 @@
 이미지 시퀀스와 동영상을 재생하고 리뷰하는 **Windows용 플레이어**입니다.
 [mrViewer (mrv2)](https://github.com/ggarra13/mrv2)의 기능을 바탕으로, 어두운 톤의 깔끔한 한국어 화면으로 새로 만들었습니다.
 
-![COC_SEQ Player](docs/screenshot.png)
+![COC_SEQ Player](docs/screenshot.jpg)
 
 - EXR(멀티레이어/AOV) · DPX · TIFF · PNG · JPG · TGA · HDR · PSD 시퀀스, MOV · MP4 · MXF · MKV 동영상과 소리
 - OpenColorIO 색 관리 (ACES 2.0 내장 설정), 노출 · 감마 · 색 보정 · LUT
@@ -94,6 +94,8 @@ python -m pytest tests        # 테스트
 - **채널**: `C` 컬러, `R` `G` `B` `A`, `Y` 휘도. 같은 키를 다시 누르면 컬러로 돌아갑니다. EXR 레이어는 `Ctrl+[` / `Ctrl+]`로 바꿉니다.
 
 ## 6. 비교 (A/B)
+
+![와이프 비교](docs/compare.jpg)
 
 - 플레이리스트에서 **Alt+클릭**하거나 우클릭 → "B로 비교"를 고르면 그 클립이 B가 되고 와이프 모드로 바뀝니다.
 - 위쪽 막대의 **비교** 단추, 비교 패널, 또는 단축키로 모드를 바꿉니다.

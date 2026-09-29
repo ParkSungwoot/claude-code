@@ -132,8 +132,11 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     fmt = QSurfaceFormat()
-    fmt.setVersion(3, 3)
-    fmt.setProfile(QSurfaceFormat.CoreProfile)
+    if not software_gl:
+        # Software Mesa (and very old drivers) may only offer a 3.0 compatibility context;
+        # the viewer adapts its shaders to GLSL 1.30 there.
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.CoreProfile)
     fmt.setSwapInterval(1)
     fmt.setDepthBufferSize(0)
     fmt.setStencilBufferSize(8)

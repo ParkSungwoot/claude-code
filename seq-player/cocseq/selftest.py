@@ -32,8 +32,9 @@ def run(out_path: str | None) -> int:
     from PySide6.QtWidgets import QApplication
 
     fmt = QSurfaceFormat()
-    fmt.setVersion(3, 3)
-    fmt.setProfile(QSurfaceFormat.CoreProfile)
+    if sys.platform != "win32":
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.CoreProfile)
     QSurfaceFormat.setDefaultFormat(fmt)
     if QApplication.instance() is None:
         if sys.platform == "win32":

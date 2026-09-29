@@ -101,6 +101,7 @@ ACTIONS: list[ActionDef] = [
     ActionDef("view.filter", "부드럽게 확대 (선형 필터)", "보기", "Ctrl+Shift+F", "", True),
     ActionDef("view.env_map", "360° 파노라마(환경 맵) 보기", "보기", "", "globe", True),
     ActionDef("view.side_panel", "사이드 패널 보이기/숨기기", "보기", "Tab", "playlist", True),
+    ActionDef("view.tools", "주석 도구 막대 보이기/숨기기", "보기", "", "pen", True),
     ActionDef("view.timeline", "타임라인 보이기/숨기기", "보기", "Ctrl+T", "", True),
 
     # Color / channels

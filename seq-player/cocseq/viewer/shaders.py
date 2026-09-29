@@ -226,3 +226,24 @@ void main() {
 
 def color_program_source(to_lin_text: str, to_disp_text: str) -> str:
     return COLOR_FRAGMENT.replace("//__OCIO_LIN__", to_lin_text).replace("//__OCIO_DISP__", to_disp_text)
+
+
+def current_glsl_version() -> int:
+    """GLSL version of the current context as an int (130, 330, 450, ...)."""
+    import re
+
+    from OpenGL import GL
+
+    raw = GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION) or b"1.30"
+    m = re.match(rb"\s*(\d+)\.(\d+)", raw)
+    if not m:
+        return 130
+    return int(m.group(1)) * 100 + int(m.group(2).ljust(2, b"0")[:2])
+
+
+def adapt(src: str, glsl: int) -> str:
+    """Rewrite a `#version 330 core` shader for older contexts (Qt's software Mesa gives GLSL 1.30)."""
+    if glsl >= 330:
+        return src
+    src = src.replace("#version 330 core", "#version 130", 1)
+    return src.replace("layout(location = 0) ", "")

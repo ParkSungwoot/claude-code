@@ -101,11 +101,13 @@ class ScrubField(QWidget):
         p.setBrush(bg)
         p.drawRoundedRect(r, 7, 7)
         if self.bar and self.maximum > self.minimum and math.isfinite(self.maximum - self.minimum):
-            k = (self._value - self.minimum) / (self.maximum - self.minimum)
-            fill = QRectF(r.left() + 1, r.top() + 1, max(0.0, (r.width() - 2) * k), r.height() - 2)
+            k = max(0.0, min(1.0, (self._value - self.minimum) / (self.maximum - self.minimum)))
+            track = QRectF(r.left() + 8, r.bottom() - 4, r.width() - 16, 2)
             p.setPen(Qt.NoPen)
-            p.setBrush(PAL.qcolor("accent", 0.18))
-            p.drawRoundedRect(fill, 6, 6)
+            p.setBrush(PAL.qcolor("bg5"))
+            p.drawRoundedRect(track, 1, 1)
+            p.setBrush(PAL.qcolor("accent", 0.9))
+            p.drawRoundedRect(QRectF(track.left(), track.top(), track.width() * k, 2), 1, 1)
         x = r.left() + 9
         if self.icon_name:
             from cocseq import icons

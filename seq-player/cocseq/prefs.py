@@ -75,6 +75,7 @@ class Prefs:
     last_dir: str = ""
     panel: str = "playlist"
     panel_visible: bool = True
+    tools_visible: bool = True
     panel_width: int = 330
 
     def add_recent(self, path: str, session: bool = False) -> None:

@@ -147,21 +147,31 @@ class MainWindow(QMainWindow):
         self.splitter.setHandleWidth(1)
         body.addWidget(self.splitter, 1)
 
-        # Viewer with floating drawing tools
+        # Viewer with the drawing tool column on its left
         self.viewer_box = QWidget()
-        vb = QVBoxLayout(self.viewer_box)
+        vb = QHBoxLayout(self.viewer_box)
         vb.setContentsMargins(0, 0, 0, 0)
+        vb.setSpacing(0)
+        self.tool_column = QFrame()
+        self.tool_column.setObjectName("ToolColumn")
+        self.tool_column.setAttribute(Qt.WA_StyledBackground, True)
+        self.tool_column.setStyleSheet(f"QFrame#ToolColumn {{ background: {PAL.bg1}; border-right: 1px solid {PAL.line}; }}")
+        tc = QVBoxLayout(self.tool_column)
+        tc.setContentsMargins(5, 8, 5, 8)
+        tc.setSpacing(0)
+        vb.addWidget(self.tool_column)
         self.viewer = ViewerWidget(self.viewer_box)
         self.viewer.set_color_manager(self.colors)
-        vb.addWidget(self.viewer)
-        self.draw_bar = ToolBar(self.viewer_box)
+        vb.addWidget(self.viewer, 1)
+        self.draw_bar = ToolBar(self.tool_column)
+        self.draw_bar.setStyleSheet("QFrame#AnnotationBar { background: transparent; border: none; }")
+        tc.addWidget(self.draw_bar)
+        tc.addStretch(1)
         self.draw_bar.toolChosen.connect(self.set_tool)
         self.draw_bar.undo.connect(self.annotation_undo)
         self.draw_bar.redo.connect(self.annotation_redo)
         self.draw_bar.clearFrame.connect(self.annotation_clear_frame)
         self.draw_bar.colorClicked.connect(lambda: self.show_panel("annotate"))
-        self.draw_bar.adjustSize()
-        self.viewer_box.installEventFilter(self)
         self.splitter.addWidget(self.viewer_box)
 
         v = self.viewer
@@ -294,7 +304,7 @@ class MainWindow(QMainWindow):
         self.layer_combo = QComboBox()
         self.layer_combo.setProperty("role", "toolbar")
         self.layer_combo.setToolTip("레이어 (EXR AOV)")
-        self.layer_combo.setMinimumWidth(128)
+        self.layer_combo.setFixedWidth(118)
         self.layer_combo.setFocusPolicy(Qt.NoFocus)
         self.layer_combo.activated.connect(lambda i: self.set_layer(self.layer_combo.itemData(i)))
         self.layer_action = tb.addWidget(self.layer_combo)
@@ -312,7 +322,7 @@ class MainWindow(QMainWindow):
 
         self.cs_combo = QComboBox()
         self.cs_combo.setToolTip("입력 색공간 (현재 클립)")
-        self.cs_combo.setFixedWidth(176)
+        self.cs_combo.setFixedWidth(164)
         self.cs_combo.setMaxVisibleItems(26)
         self.cs_combo.setFocusPolicy(Qt.NoFocus)
         self.cs_combo.activated.connect(lambda i: self.set_colorspace(self.cs_combo.itemData(i)))
@@ -323,13 +333,13 @@ class MainWindow(QMainWindow):
         tb.addWidget(arrow)
         self.display_combo = QComboBox()
         self.display_combo.setToolTip("디스플레이")
-        self.display_combo.setFixedWidth(136)
+        self.display_combo.setFixedWidth(128)
         self.display_combo.setFocusPolicy(Qt.NoFocus)
         self.display_combo.activated.connect(lambda i: self.set_display_view(self.display_combo.itemText(i), None))
         tb.addWidget(self.display_combo)
         self.view_combo = QComboBox()
         self.view_combo.setToolTip("뷰 변환")
-        self.view_combo.setFixedWidth(176)
+        self.view_combo.setFixedWidth(164)
         self.view_combo.setFocusPolicy(Qt.NoFocus)
         self.view_combo.activated.connect(lambda i: self.set_display_view(None, self.view_combo.itemText(i)))
         tb.addWidget(self.view_combo)
@@ -341,7 +351,7 @@ class MainWindow(QMainWindow):
         self.zoom_combo = QComboBox()
         self.zoom_combo.setEditable(True)
         self.zoom_combo.setProperty("role", "toolbar")
-        self.zoom_combo.setFixedWidth(84)
+        self.zoom_combo.setFixedWidth(92)
         self.zoom_combo.setToolTip("확대 비율")
         self.zoom_combo.setFocusPolicy(Qt.ClickFocus)
         for z in ("맞춤", "12%", "25%", "50%", "100%", "200%", "400%", "800%"):
@@ -568,6 +578,7 @@ class MainWindow(QMainWindow):
             "view.env_map": self.toggle_env,
             "view.side_panel": lambda: self.set_side_visible(not self.side.isVisible()),
             "view.timeline": lambda: self.bottom.setVisible(not self.bottom.isVisible()),
+            "view.tools": self.toggle_tool_column,
             "ch.next_layer": lambda: self._layer_step(1),
             "ch.prev_layer": lambda: self._layer_step(-1),
             "color.exposure_up": lambda: self._set_display(exposure=round(v.display.exposure + 0.5, 2)),
@@ -687,7 +698,7 @@ class MainWindow(QMainWindow):
         for aid in ("view.fullscreen", "view.presentation", "view.on_top"):
             m.addAction(A(aid))
         m.addSeparator()
-        for aid in ("view.side_panel", "view.timeline"):
+        for aid in ("view.side_panel", "view.tools", "view.timeline"):
             m.addAction(A(aid))
 
         m = mb.addMenu("재생")
@@ -824,11 +835,14 @@ class MainWindow(QMainWindow):
         self._sync_view_actions()
         if initial:
             self.set_side_visible(p.panel_visible)
+            self.tool_column.setVisible(p.tools_visible)
             self.show_panel(p.panel if p.panel in self.panels else "playlist")
             geo = self.store.value("window_geometry")
             if geo:
                 self.restoreGeometry(QByteArray(geo))
             sizes = self.store.value("splitter_sizes")
+            if not sizes:
+                self.splitter.setSizes([1200, 340])
             if sizes:
                 try:
                     self.splitter.setSizes([int(s) for s in sizes])
@@ -1720,6 +1734,9 @@ class MainWindow(QMainWindow):
         act = self.actions_by_id.get("view.side_panel")
         if act:
             act.setChecked(self.side.isVisible())
+        act = self.actions_by_id.get("view.tools")
+        if act:
+            act.setChecked(self.tool_column.isVisible())
 
     def set_background(self, key: str) -> None:
         v = self.viewer
@@ -1780,16 +1797,18 @@ class MainWindow(QMainWindow):
             self._pre_presentation_state = (self.side.isVisible(), self.bottom.isVisible(), self.isFullScreen(),
                                             self.isMaximized())
             self._presentation = True
+            self._pre_presentation_tools = self.tool_column.isVisible()
             for w in (self.side, self.rail, self.bottom, self.toolbar, self.menuBar(), self.statusBar(),
-                      self.draw_bar):
+                      self.tool_column):
                 w.hide()
             if not self.isFullScreen():
                 self.showFullScreen()
         else:
             self._presentation = False
             side, bottom, full, maxed = self._pre_presentation_state or (True, True, False, False)
-            for w in (self.rail, self.toolbar, self.menuBar(), self.statusBar(), self.draw_bar):
+            for w in (self.rail, self.toolbar, self.menuBar(), self.statusBar()):
                 w.show()
+            self.tool_column.setVisible(getattr(self, "_pre_presentation_tools", True))
             self.side.setVisible(side)
             self.bottom.setVisible(bottom)
             if not full:
@@ -1868,17 +1887,10 @@ class MainWindow(QMainWindow):
         if hasattr(self.scopes_panel, "set_image"):
             self.scopes_panel.set_image(img)
 
-    def eventFilter(self, obj, ev) -> bool:
-        if obj is self.viewer_box and ev.type() == ev.Type.Resize:
-            self._place_draw_bar()
-        return super().eventFilter(obj, ev)
-
-    def _place_draw_bar(self) -> None:
-        bar = self.draw_bar
-        bar.adjustSize()
-        h = self.viewer_box.height()
-        bar.move(12, max(8, (h - bar.height()) // 2))
-        bar.raise_()
+    def toggle_tool_column(self) -> None:
+        self.tool_column.setVisible(not self.tool_column.isVisible())
+        self.prefs.tools_visible = self.tool_column.isVisible()
+        self._sync_view_actions()
 
     # ================================================================ annotations
 
@@ -2046,7 +2058,7 @@ class MainWindow(QMainWindow):
             br.append(f"캐시 {human_bytes(self.cache.used)}")
         if self.compare_mode != "A" and self._visible_compare():
             names = " · ".join(s.name for s in self._visible_compare())
-            br.append(f"{COMPARE_LABELS[self.compare_mode][2]}  ·  {names}")
+            br.append(f"{COMPARE_LABELS[self.compare_mode][2].split(' (')[0]}  ·  {names}")
         v.hud = {"tl": tl, "tr": tr, "bl": bl, "br": br}
         v.update()
 
@@ -2334,7 +2346,6 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, ev) -> None:
         super().showEvent(ev)
-        QTimer.singleShot(0, self._place_draw_bar)
         if sys.platform == "win32":
             _dark_title_bar(self)
 
@@ -2372,13 +2383,13 @@ class CompareButton(QToolButton):
             a.triggered.connect(lambda _=False, k=key: self.changed.emit(k))
             self._acts[key] = a
         self.setMenu(menu)
-        self.setMinimumWidth(96)
+        self.setMinimumWidth(84)
         self.set_value("A")
 
     def set_value(self, key: str) -> None:
         icon_name, short, label = COMPARE_LABELS.get(key, COMPARE_LABELS["A"])
         self.setIcon(icons.icon(icon_name, size=16))
-        self.setText(f"비교 · {short}" if key != "A" else "비교 끔")
+        self.setText(short if key != "A" else "비교")
         if key in self._acts:
             self._acts[key].setChecked(True)
 

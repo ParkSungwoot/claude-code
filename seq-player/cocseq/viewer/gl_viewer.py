@@ -20,7 +20,7 @@ from cocseq.annotations import Shape, render_layer
 from cocseq.color.ocio_mgr import ColorManager, ColorPipeline
 from cocseq.media.frame import Frame
 from cocseq.theme import PAL, mono_font, ui_font
-from cocseq.viewer.shaders import COMPOSITE_FRAGMENT, VERTEX, color_program_source
+from cocseq.viewer.shaders import COMPOSITE_FRAGMENT, VERTEX, adapt, color_program_source, current_glsl_version
 
 log = logging.getLogger(__name__)
 
@@ -149,13 +149,17 @@ def _compile(kind, src: str) -> int:
     return sh
 
 
-def _link(vs_src: str, fs_src: str) -> int:
-    vs = _compile(GL.GL_VERTEX_SHADER, vs_src)
-    fs = _compile(GL.GL_FRAGMENT_SHADER, fs_src)
+def _link(vs_src: str, fs_src: str, glsl: int | None = None) -> int:
+    if glsl is None:
+        glsl = current_glsl_version()
+    vs = _compile(GL.GL_VERTEX_SHADER, adapt(vs_src, glsl))
+    fs = _compile(GL.GL_FRAGMENT_SHADER, adapt(fs_src, glsl))
     pid = GL.glCreateProgram()
     GL.glAttachShader(pid, vs)
     GL.glAttachShader(pid, fs)
     GL.glBindAttribLocation(pid, 0, "a_pos")
+    if glsl < 330:
+        GL.glBindFragDataLocation(pid, 0, "fragColor")
     GL.glLinkProgram(pid)
     GL.glDeleteShader(vs)
     GL.glDeleteShader(fs)
@@ -512,6 +516,7 @@ class ViewerWidget(QOpenGLWidget):
             ver = GL.glGetString(GL.GL_VERSION)
             ren = GL.glGetString(GL.GL_RENDERER)
             info = f"{(ren or b'').decode(errors='replace')} / OpenGL {(ver or b'').decode(errors='replace')}"
+            self._glsl = current_glsl_version()
             self._composite = self._make_program(COMPOSITE_FRAGMENT)
             quad = np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype=np.float32)
             self._vao = GL.glGenVertexArrays(1)
@@ -543,7 +548,7 @@ class ViewerWidget(QOpenGLWidget):
         self._export_slot = None
 
     def _make_program(self, fragment: str) -> _Program:
-        pid = _link(VERTEX, fragment)
+        pid = _link(VERTEX, fragment, getattr(self, "_glsl", None))
         return _Program(pid)
 
     def _loc(self, prog: _Program, name: str) -> int:

@@ -201,8 +201,14 @@ class Timeline(QWidget):
             wr = QRectF(a.left(), clip.bottom() + 6, a.width(), self.WAVE_H)
             self._paint_wave(p, wr)
 
-        # Ruler
-        self._paint_ruler(p, a, v0, v1, ppf)
+        # Ruler (labels hidden under the playhead label)
+        avoid = None
+        if self.first <= self.frame <= self.last:
+            label = format_frame(self.frame, self.time_mode, self.fps, self.first)
+            lw = QFontMetricsF(mono_font(8, QFont.DemiBold)).horizontalAdvance(label) + 12
+            xph = self.x_of(self.frame)
+            avoid = (xph - lw / 2 - 4, xph + lw / 2 + 4)
+        self._paint_ruler(p, a, v0, v1, ppf, avoid)
 
         # Hover line
         if self._hover_x >= 0 and not self._scrubbing:
@@ -293,7 +299,7 @@ class Timeline(QWidget):
         p.drawPath(path)
         p.restore()
 
-    def _paint_ruler(self, p: QPainter, a: QRectF, v0: float, v1: float, ppf: float) -> None:
+    def _paint_ruler(self, p: QPainter, a: QRectF, v0: float, v1: float, ppf: float, avoid=None) -> None:
         span = v1 - v0
         p.setFont(mono_font(7.5))
         fm = QFontMetricsF(p.font())
@@ -325,8 +331,10 @@ class Timeline(QWidget):
                 p.setPen(QPen(PAL.qcolor("text3"), 1))
                 p.drawLine(QPointF(x, self.RULER_H - 7), QPointF(x, self.RULER_H - 1))
                 label = format_frame(int(round(t)), self.time_mode, self.fps, self.first)
-                p.setPen(PAL.qcolor("text3"))
-                p.drawText(QPointF(x + 3, self.RULER_H - 8), label)
+                lx1 = x + 3 + fm.horizontalAdvance(label)
+                if avoid is None or lx1 < avoid[0] or x + 3 > avoid[1]:
+                    p.setPen(PAL.qcolor("text3"))
+                    p.drawText(QPointF(x + 3, self.RULER_H - 8), label)
             t += step
 
     # ---------------------------------------------------------------- mouse

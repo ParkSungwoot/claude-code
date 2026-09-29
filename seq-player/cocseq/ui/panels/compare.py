@@ -80,7 +80,7 @@ class ComparePanel(QWidget):
             b.setIconSize(QSize(20, 20))
             b.setText(text)
             b.setToolTip(tip)
-            b.setMinimumSize(66, 54)
+            b.setMinimumSize(50, 54)
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(f"QToolButton {{ background: {PAL.bg3}; border: 1px solid {PAL.line}; border-radius: 9px;"
                             f" font-size: 11px; color: {PAL.text2}; }}"

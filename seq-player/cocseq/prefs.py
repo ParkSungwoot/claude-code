@@ -30,6 +30,9 @@ class Prefs:
     movie_start_frame: int = 1
     compare_align: str = "relative"    # relative | absolute
     playlist_continuous: bool = False  # after the last frame go on to the next clip
+    auto_refresh: bool = True          # watch render folders and pick up new / re-rendered frames
+    auto_refresh_interval: float = 2.0 # seconds between folder checks (network drives)
+    auto_refresh_follow: bool = False  # jump to new last frames while stopped on the old last frame
 
     # Cache
     cache_gb: float = field(default_factory=default_cache_gb)

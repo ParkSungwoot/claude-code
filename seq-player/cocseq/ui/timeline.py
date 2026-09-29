@@ -37,6 +37,7 @@ class Timeline(QWidget):
         self.cached: set[int] = set()
         self.marks: list[int] = []
         self.missing: set[int] = set()
+        self.bad: set[int] = set()          # 0-byte / unreadable / mismatched frames from the frame check
         self.clip_name = ""
         self.peaks: np.ndarray | None = None
         self.peaks_offset = 0.0         # frames of audio before the first frame
@@ -89,6 +90,10 @@ class Timeline(QWidget):
     def set_missing(self, missing) -> None:
         self.missing = set(missing)
         self._cache_key = None
+        self.update()
+
+    def set_bad(self, frames) -> None:
+        self.bad = set(frames)
         self.update()
 
     def set_fps(self, fps: float) -> None:
@@ -241,7 +246,7 @@ class Timeline(QWidget):
 
     def _paint_cache(self, p: QPainter, clip: QRectF, ppf: float) -> None:
         y = clip.bottom() - 4
-        if not self.cached and not self.missing:
+        if not self.cached and not self.missing and not self.bad:
             return
         v0, v1 = self._visible()
         lo, hi = int(math.floor(v0)), int(math.ceil(v1))
@@ -260,9 +265,11 @@ class Timeline(QWidget):
             r = QRectF(max(xa, clip.left() + 3), y, min(xb, clip.right() - 3) - max(xa, clip.left() + 3), 2.5)
             if r.width() > 0:
                 p.drawRect(r)
-        if self.missing:
-            p.setBrush(PAL.qcolor("err"))
-            for f in self.missing:
+        for frames, color in ((self.missing, "err"), (self.bad - self.missing, "warn")):
+            if not frames:
+                continue
+            p.setBrush(PAL.qcolor(color))
+            for f in frames:
                 if lo <= f <= hi:
                     x = self.x_of(f)
                     p.drawRect(QRectF(x - max(1.0, ppf / 2), clip.top() + 3, max(2.0, ppf), clip.height() - 6))

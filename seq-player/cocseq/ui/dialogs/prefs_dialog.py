@@ -1071,6 +1071,16 @@ class PreferencesDialog(QDialog):
                         [("black", "검은 화면+표시", "검은 화면에 '누락' 표시"),
                          ("hold", "이전 프레임 유지", "바로 앞 프레임을 계속 보여 줌")])
 
+        card = page.section("렌더 폴더 자동 새로고침")
+        self._switch(page, card, "auto_refresh", "자동 새로고침",
+                     "렌더 중인 시퀀스에 새로 생기거나 다시 렌더된 프레임을 자동으로 불러옵니다")
+        self._segmented(page, card, "auto_refresh_interval", "확인 간격", "네트워크 드라이브에서 폴더를 다시 확인하는 주기",
+                        [("1.0", "1초"), ("2.0", "2초"), ("5.0", "5초"), ("10.0", "10초")],
+                        convert=lambda x: float(x) if x else 2.0,
+                        min_width=44)
+        self._switch(page, card, "auto_refresh_follow", "새 프레임 따라가기",
+                     "정지 상태에서 마지막 프레임을 보고 있으면 새로 생긴 마지막 프레임으로 이동합니다")
+
         card = page.section("시간 표시")
         self._segmented(page, card, "time_display", "시간 단위", "타임라인과 현재 위치 표시에 쓸 단위",
                         [("frames", "프레임"), ("timecode", "타임코드"), ("seconds", "초")], min_width=44)

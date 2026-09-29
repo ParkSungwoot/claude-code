@@ -1,0 +1,13 @@
+{
+  "name": "after-effects-scripts-dev",
+  "private": true,
+  "description": "Mock ExtendScript/ScriptUI/After Effects environment used to test the .jsx scripts without After Effects",
+  "scripts": {
+    "test": "node lint.js && node encoding.js && node tests.js"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0",
+    "acorn-walk": "^8.3.4",
+    "iconv-lite": "^0.7.0"
+  }
+}

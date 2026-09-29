@@ -1,0 +1,7 @@
+# 애프터 이펙트 스크립트(.jsx)는 한글이 깨지지 않도록 'UTF-8 (BOM)' 으로 저장합니다.
+[*.jsx]
+charset = utf-8-bom
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
